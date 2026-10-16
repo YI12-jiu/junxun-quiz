@@ -414,8 +414,27 @@ kbd {
 .violation-card h3 { margin: 0 0 12px; font-size: 21px; color: var(--bad); }
 .violation-card p { margin: 0 0 20px; font-size: 15px; color: var(--ink-2); line-height: 1.8; }
 
-/* 考试屏禁止选中文本（配合复制粘贴拦截） */
-#screen-exam { user-select: none; -webkit-user-select: none; }
+/* 考试屏禁止选中文本（配合复制粘贴拦截）；
+   手机端还要关掉 iOS 长按弹出的「拷贝/查询」气泡 */
+#screen-exam {
+  user-select: none; -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#screen-exam input, #screen-exam textarea { -webkit-user-select: text; user-select: text; }
+
+/* ---------- 屏幕水印（手机截图无法检测，用身份水印追溯） ---------- */
+.wm {
+  position: fixed; inset: 0; z-index: 60; pointer-events: none; overflow: hidden;
+  display: flex; flex-wrap: wrap; align-content: flex-start;
+}
+.wm i {
+  font-style: normal; font-weight: 700; font-size: 13px; letter-spacing: .5px;
+  color: rgba(50, 70, 130, .085); padding: 26px 30px; white-space: nowrap;
+  transform: rotate(-22deg);
+}
+.screen:not(.active) .wm { display: none; }
+.mob-hint { margin: 12px 0 0; }
 
 /* ---------- 打印 ---------- */
 @media print {

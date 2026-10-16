@@ -640,7 +640,8 @@
     soundBuf: null,
     audioCtx: null,
     micStream: null,
-    splitSince: 0,
+    splitSince: 0,        // 桌面端分屏（窗口宽度）计时
+    msplitSince: 0,       // 手机端分屏（可视高度）计时——必须与上面分开，否则互相清零
     watchTimer: null,
   };
 
@@ -652,7 +653,19 @@
   var SOUND_DB_LIMIT = -25;    // 限值（dBFS），超过即违规
   var SOUND_HOLD     = 5;      // 连续超标次数（每 100ms 一次，约 0.5 秒）
   var SOUND_FLOOR    = -100;   // 电平下限，避免 log(0)
-  var SPLIT_MIN_SCREEN = 1100; // 屏幕窄于此值时不判定分屏（避免小屏误报）
+  var SPLIT_MIN_SCREEN = 1100; // 桌面端：屏幕窄于此值时不判定分屏（避免小屏误报）
+  var MOBILE_SPLIT_RATIO = 0.6;// 手机端：可视高度不足屏幕高度的 60% 视为分屏/悬浮窗
+  var TYPING_GRACE = 2500;     // 刚碰过输入框后的宽限时间（输入法弹出会缩小视口，不能算分屏）
+  var lastTypingAt = 0;
+
+  /* 触屏设备判定：手机 / 平板走另一套分屏规则（它们没有真正的全屏 API） */
+  function isTouch() {
+    return (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
+  }
+  function noteTyping() { lastTypingAt = Date.now(); }
+  function inInput(el) {
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+  }
 
   /* 设定抑制窗口：ms 毫秒内不判定违规。
      注意必须「直接覆盖」而不是取最大值——开考前的准备窗口（20 秒）会被进入考试后的
@@ -677,6 +690,7 @@
     GUARD.armed = true;
     GUARD.fired = false;
     GUARD.splitSince = 0;
+    GUARD.msplitSince = 0;
     GUARD.soundHits = 0;
     GUARD.soundDb = SOUND_FLOOR;
     GUARD.soundPeakDb = SOUND_FLOOR;
@@ -814,8 +828,40 @@
   document.addEventListener('contextmenu', function (e) {
     if (e.preventDefault) e.preventDefault();
     if (!guardActive()) return;
-    trip('copy', '打开了右键菜单');
+    trip('copy', '打开了右键菜单或长按菜单');
   }, true);
+
+  /* 移动端加固：
+     ① 长按选中后系统会弹出「拷贝/粘贴」菜单，iOS 不一定触发 contextmenu，
+        因此同时捕获 selectstart、以及 beforeinput 的 insertFromPaste；
+     ② 输入框被粘贴/拖入内容同样算违规。 */
+  document.addEventListener('selectstart', function (e) {
+    if (!guardActive()) return;
+    if (inInput(e.target)) return;          // 在输入框里选中自己打的字是正常的
+    if (e.preventDefault) e.preventDefault();
+    trip('copy', '尝试选中页面文字（移动端长按选择）');
+  }, true);
+
+  document.addEventListener('beforeinput', function (e) {
+    if (!guardActive()) return;
+    var t = String(e.inputType || '');
+    if (t.indexOf('insertFromPaste') === 0 || t === 'insertFromDrop') {
+      trip('copy', '粘贴了内容（移动端长按粘贴 / 输入法粘贴）');
+    }
+  }, true);
+
+  document.addEventListener('drop', function (e) {
+    if (e.preventDefault) e.preventDefault();
+    if (!guardActive()) return;
+    trip('copy', '拖入了内容');
+  }, true);
+
+  /* 记录「正在用输入框」，供手机端分屏判定避开输入法弹出的干扰 */
+  ['focusin', 'focusout', 'input'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) {
+      if (inInput(e.target)) noteTyping();
+    }, true);
+  });
 
   /* ---- 周期性巡检：分屏 / 全屏状态 ---- */
   function checkSplit() {
@@ -832,10 +878,33 @@
       GUARD.splitSince = 0;
     }
   }
-  window.addEventListener('resize', checkSplit);
+
+  /* 手机 / 平板的分屏判定：这些设备没有可用的全屏 API，改看「可视高度占屏幕高度的比例」。
+     Android 分屏、悬浮窗、小窗播放都会让可视区明显变矮。
+     输入法弹出同样会压矮视口，因此刚碰过输入框的 2.5 秒内不判定。 */
+  function checkMobileSplit() {
+    if (!guardActive()) { GUARD.msplitSince = 0; return; }
+    if (!isTouch()) { GUARD.msplitSince = 0; return; }
+    var sh = (window.screen && window.screen.height) || 0;
+    var ih = window.innerHeight || 0;
+    if (!sh || !ih) { GUARD.msplitSince = 0; return; }
+    if (Date.now() - lastTypingAt < TYPING_GRACE) { GUARD.msplitSince = 0; return; }
+    if (ih < sh * MOBILE_SPLIT_RATIO) {
+      if (!GUARD.msplitSince) GUARD.msplitSince = Date.now();
+      else if (Date.now() - GUARD.msplitSince > 1500) {
+        trip('split', '可视高度仅占屏幕的 ' + Math.round(ih / sh * 100) + '%（疑似分屏或悬浮窗）');
+      }
+    } else {
+      GUARD.msplitSince = 0;
+    }
+  }
+
+  function checkAllSplit() { checkSplit(); checkMobileSplit(); }
+  window.addEventListener('resize', checkAllSplit);
+  window.addEventListener('orientationchange', function () { noteTyping(); setTimeout(checkAllSplit, 800); });
   function startGuardWatch() {
     clearInterval(GUARD.watchTimer);
-    GUARD.watchTimer = setInterval(checkSplit, 1000);
+    GUARD.watchTimer = setInterval(checkAllSplit, 1000);
   }
 
   /* ---------- 开始考试 ---------- */
@@ -894,6 +963,7 @@
     uploadState = { status: 'idle', msg: '', sub: '' };
     renderUpload();
     $('violation-mask').hidden = true;
+    renderWatermark();
     renderGuardStatus();
     $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
     armGuard();
@@ -943,6 +1013,22 @@
   }
   function stopTimer() { clearInterval(S.timer); S.timer = null; }
 
+  /* 屏幕水印：手机系统截图无法被网页检测，用带考生身份的水印做追溯威慑 */
+  function renderWatermark() {
+    var el = $('watermark');
+    if (!el) return;
+    var e = S.examinee || {};
+    var txt = [e.name, e.sid, e.cls].filter(Boolean).join(' ');
+    if (!txt) { el.innerHTML = ''; return; }
+    var now = new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    var stamp = now.getFullYear() + '-' + p(now.getMonth() + 1) + '-' + p(now.getDate());
+    var unit = txt + '　' + stamp;
+    var html = '';
+    for (var i = 0; i < 40; i++) html += '<i>' + esc(unit) + '</i>';
+    el.innerHTML = html;
+  }
+
   /* 考场状态条：说明当前哪几项管控已生效 */
   function renderGuardStatus() {
     var el = $('guard-status');
@@ -950,10 +1036,11 @@
     var items = [
       ['退出/切屏拦截', true],
       ['截屏拦截', true],
-      ['全屏与分屏拦截', GUARD.fsOk],
+      [isTouch() ? '分屏/悬浮窗拦截' : '全屏与分屏拦截', isTouch() ? true : GUARD.fsOk],
       ['复制粘贴拦截', true],
       ['环境声音监测', GUARD.soundOk],
     ];
+    items.push(['屏幕水印追溯', true]);
     el.innerHTML = items.map(function (it) {
       return '<span class="gitem ' + (it[1] ? 'on' : 'off') + '">' + (it[1] ? '✔' : '✖') + ' ' + esc(it[0]) + '</span>';
     }).join('') +

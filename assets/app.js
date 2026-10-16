@@ -326,7 +326,7 @@
       { k: '每题分值', v: PER_SCORE, s: '分' },
       { k: '试卷满分', v: FULL_SCORE, s: '分' },
       { k: '考核限时', v: LIMIT_MIN, s: '分钟，到时自动交卷' },
-      { k: '题库总量', v: bankTotal, s: '题（' + RULES.length + ' 个题库合并）' },
+      { k: '题库总量', v: bankTotal, s: '题（' + usedBanks.length + ' 个题库合并）' },
     ];
     $('start-stats').innerHTML = cards.map(function (c) {
       return '<div class="stat"><div class="k">' + esc(c.k) + '</div>' +
@@ -677,8 +677,9 @@
     fsOk: false,           // 浏览器是否支持并成功进入全屏
     soundOk: false,        // 是否成功开启麦克风声音监测
     soundHits: 0,
-    soundDb: -100,         // 当前环境声音电平（dBFS）
-    soundPeakDb: -100,     // 本次考核测到的最高电平
+    soundDb: 0,            // 当前环境声音等级（0~100 相对声级）
+    soundPeakDb: 0,        // 本次考核测到的最高等级
+    soundFloat: true,      // 是否用浮点采样（精度更高）
     soundTimer: null,
     soundBuf: null,
     audioCtx: null,
@@ -689,13 +690,15 @@
   };
 
   /* ---------- 环境声音限值 ----------
-     浏览器只能测「相对满量程电平」（dBFS），无法测真实声压级（dB SPL 需要校准过的麦克风），
-     所以这里的「25 分贝」实现为：瞬时声级超过 -25 dBFS 即视为超标。
-     参考：安静房间约 -55 dBFS，小声交谈约 -40 dBFS，正常说话约 -25 ~ -30 dBFS，数值越大越吵。
-     超标需连续保持 SOUND_HOLD 次采样才判违规，避免单次爆音（关门、咳嗽）误伤。 */
-  var SOUND_DB_LIMIT = -25;    // 限值（dBFS），超过即违规
+     浏览器测不到真实声压级（dB SPL 需要校准过的麦克风），只能测相对电平。
+     界面统一换算成 **0~100 的相对声级**（= dBFS + 100），数值越大越吵：
+       0~20 数字静音 / 30~40 很安静的房间 / 45~55 小声交谈 / 60~80 正常说话 / 85+ 大声
+       限值 50 大致对应「小声交谈」的起点
+     另：采样必须用 getFloatTimeDomainData（浮点）而不是 8 位版本 ——
+     8 位量化下「任何非静音」的底噪就有 58，限值定得低会退化成「有声音就触发」。 */
+  var SOUND_DB_LIMIT = 50;     // 限值（0~100 相对声级），超过即记录
   var SOUND_HOLD     = 5;      // 连续超标次数（每 100ms 一次，约 0.5 秒）
-  var SOUND_FLOOR    = -100;   // 电平下限，避免 log(0)
+  var SOUND_FLOOR    = 0;      // 声级下限
   var SPLIT_MIN_SCREEN = 1100; // 桌面端：屏幕窄于此值时不判定分屏（避免小屏误报）
   var MOBILE_SPLIT_RATIO = 0.6;// 手机端：可视高度不足屏幕高度的 60% 视为分屏/悬浮窗
   var TYPING_GRACE = 2500;     // 刚碰过输入框后的宽限时间（输入法弹出会缩小视口，不能算分屏）
@@ -800,19 +803,28 @@
       analyser.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(analyser);
       GUARD.audioCtx = ctx;
-      GUARD.soundBuf = new Uint8Array(analyser.fftSize);
+      GUARD.soundFloat = typeof analyser.getFloatTimeDomainData === 'function';
+      GUARD.soundBuf = GUARD.soundFloat
+        ? new Float32Array(analyser.fftSize)
+        : new Uint8Array(analyser.fftSize);
       GUARD.soundOk = true;
       GUARD.soundTimer = setInterval(function () {
         if (!guardActive() || !GUARD.soundBuf) return;
-        analyser.getByteTimeDomainData(GUARD.soundBuf);
-        var sum = 0;
-        for (var i = 0; i < GUARD.soundBuf.length; i++) {
-          var v = (GUARD.soundBuf[i] - 128) / 128;
-          sum += v * v;
+        var sum = 0, i, v;
+        if (GUARD.soundFloat) {
+          analyser.getFloatTimeDomainData(GUARD.soundBuf);
+          for (i = 0; i < GUARD.soundBuf.length; i++) { v = GUARD.soundBuf[i]; sum += v * v; }
+        } else {
+          analyser.getByteTimeDomainData(GUARD.soundBuf);
+          for (i = 0; i < GUARD.soundBuf.length; i++) {
+            v = (GUARD.soundBuf[i] - 128) / 128; sum += v * v;
+          }
         }
         var rms = Math.sqrt(sum / GUARD.soundBuf.length);
-        var db = rms > 0 ? 20 * Math.log10(rms) : SOUND_FLOOR;
-        if (!isFinite(db) || db < SOUND_FLOOR) db = SOUND_FLOOR;
+        var dbfs = rms > 0 ? 20 * Math.log10(rms) : -100;
+        if (!isFinite(dbfs) || dbfs < -100) dbfs = -100;
+        var db = Math.round(dbfs + 100);          // 换算成 0~100 的相对声级
+        if (db < SOUND_FLOOR) db = SOUND_FLOOR;
         GUARD.soundDb = db;
         if (db > GUARD.soundPeakDb) GUARD.soundPeakDb = db;
         renderSoundMeter();
@@ -821,7 +833,7 @@
         else if (GUARD.soundHits > 0) GUARD.soundHits--;
         if (GUARD.soundHits >= SOUND_HOLD) {
           GUARD.soundHits = 0;                 // 复位，避免持续超标时每 0.5 秒重复触发
-          flagSound('环境声音 ' + db.toFixed(1) + ' dB，超过限值 ' + SOUND_DB_LIMIT +
+          flagSound('环境声音 ' + db + ' dB，超过限值 ' + SOUND_DB_LIMIT +
             ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒', db);
         }
       }, 100);
@@ -837,8 +849,8 @@
     var flagged = !!(S.violation && S.violation.code === 'sound');
     var over = db > SOUND_DB_LIMIT;
     el.className = 'gmeter' + (over ? ' over' : '') + (flagged ? ' flagged' : '');
-    el.textContent = '环境声音 ' + (db <= SOUND_FLOOR ? '--' : db.toFixed(1)) +
-      ' dB　限值 ' + SOUND_DB_LIMIT + ' dB' + (flagged ? '　已记录' : '');
+    el.textContent = '环境声音 ' + db + ' dB　限值 ' + SOUND_DB_LIMIT + ' dB' +
+      (flagged ? '　已记录' : '');
   }
   function stopSoundMonitor() {
     clearInterval(GUARD.soundTimer);
@@ -1567,7 +1579,7 @@
         : (S.timedOut ? '<b>考核状态：超时自动交卷</b>。' : '考核状态：正常交卷。')) +
       '　环境声音监测：' + (GUARD.soundOk
         ? '已开启（限值 ' + SOUND_DB_LIMIT + ' dB，本次最高 ' +
-          (GUARD.soundPeakDb <= SOUND_FLOOR ? '--' : GUARD.soundPeakDb.toFixed(1)) + ' dB）'
+          GUARD.soundPeakDb + ' dB）'
         : '未开启（未取得麦克风授权）') + '。</p>');
 
     h.push('<h2>二、分题库得分</h2>');

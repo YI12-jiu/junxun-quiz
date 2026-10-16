@@ -15,7 +15,8 @@
   var PER_SCORE  = 2;                          // 每题 2 分（50 题 × 2 = 100）
   var FULL_SCORE = 100;                        // 满分 100 分
   var PASS_SCORE = 60;                         // 及格线
-  var LIMIT_SEC  = 60 * 60;                    // 单次考核限时：1 小时
+  var LIMIT_MIN  = 35;                         // 单次考核限时（分钟）
+  var LIMIT_SEC  = LIMIT_MIN * 60;             // 换算成秒
   var TOTAL_Q    = RULES.reduce(function (n, r) {
     return n + (r.any || 0) + r.fill + r.multi + r.single;
   }, 0); // 40
@@ -295,7 +296,7 @@
       { k: '全卷题量', v: TOTAL_Q, s: '题（' + compTxt.join(' · ') + '）' },
       { k: '每题分值', v: PER_SCORE, s: '分' },
       { k: '试卷满分', v: FULL_SCORE, s: '分' },
-      { k: '考核限时', v: 60, s: '分钟，到时自动交卷' },
+      { k: '考核限时', v: LIMIT_MIN, s: '分钟，到时自动交卷' },
       { k: '题库总量', v: bankTotal, s: '题（' + RULES.length + ' 个题库合并）' },
     ];
     $('start-stats').innerHTML = cards.map(function (c) {
@@ -1215,7 +1216,7 @@
         vb.hidden = false;
         vb.className = 'result-alert warn';
         vb.innerHTML = '<b>答题时间已用完，系统自动交卷</b>' +
-          '<br><span class="hint">限时 60 分钟，超时自动交卷不属于违规行为。</span>';
+          '<br><span class="hint">限时 ' + LIMIT_MIN + ' 分钟，超时自动交卷不属于违规行为。</span>';
       } else {
         vb.hidden = true;
         vb.innerHTML = '';
@@ -1384,7 +1385,7 @@
     h.push('<table><tr><th>最终得分</th><th>试卷满分</th><th>答对</th><th>答错</th><th>未作答</th><th>正确率</th></tr>');
     h.push('<tr><td>' + score + '</td><td>100</td><td>' + R.right + '</td><td>' + R.wrong +
       '</td><td>' + R.blank + '</td><td>' + (R.right / TOTAL_Q * 100).toFixed(0) + '%</td></tr></table>');
-    h.push('<p class="note">考核限时 60 分钟，实际用时 ' + fmtTime(S.elapsed) + '。' +
+    h.push('<p class="note">考核限时 ' + LIMIT_MIN + ' 分钟，实际用时 ' + fmtTime(S.elapsed) + '。' +
       (S.violation
         ? '<b>考核状态：违规（' + esc(VIOLATIONS[S.violation.code] || S.violation.code) + '）</b>，系统已立即交卷。'
         : (S.timedOut ? '<b>考核状态：超时自动交卷</b>。' : '考核状态：正常交卷。')) +

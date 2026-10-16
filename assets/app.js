@@ -6,17 +6,29 @@
   'use strict';
 
   /* ---------- 抽题规则（严格按要求配置） ---------- */
+  /* 全卷 40 题：填空 10 + 多选 10 + 单选 20，每题 2.5 分，满分 100 分 */
   var RULES = [
-    { bank: 'saf', total: 4,  multi: null },  // 安全知识：4 题（不限题型）
-    { bank: 'mil', total: 23, multi: 6    },  // 军事技能训练理论：23 题，其中 6 道多选
-    { bank: 'stu', total: 13, multi: 4    },  // 学生手册：13 题，其中 4 道多选
+    { bank: 'zib', fill: 10, multi: 0, single: 0  },  // 自编题（校情校史）：10 道填空
+    { bank: 'mil', fill: 0,  multi: 6, single: 11 },  // 军事技能训练理论：多选 6 + 单选 11
+    { bank: 'stu', fill: 0,  multi: 4, single: 6  },  // 学生手册：多选 4 + 单选 6
+    { bank: 'saf', fill: 0,  multi: 0, single: 3  },  // 安全知识：单选 3
   ];
   var PER_SCORE  = 2.5;                        // 每题 2.5 分
   var FULL_SCORE = 100;                        // 满分 100 分
   var PASS_SCORE = 60;                         // 及格线
-  var TOTAL_Q    = RULES.reduce(function (n, r) { return n + r.total; }, 0); // 40
+  var LIMIT_SEC  = 60 * 60;                    // 单次考核限时：1 小时
+  var TOTAL_Q    = RULES.reduce(function (n, r) { return n + r.fill + r.multi + r.single; }, 0); // 40
   var BANK_META  = window.BANK_META || {};
   var BANKS      = window.BANKS || {};
+
+  /* 违规类型：一经触发立刻交卷，同时上报云端供教师端标红报警 */
+  var VIOLATIONS = {
+    leave:      '退出考试界面',
+    screenshot: '截屏',
+    split:      '分屏 / 调整窗口',
+    copy:       '复制粘贴',
+    sound:      '环境声音',
+  };
 
   /* ---------- 工具 ---------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -42,6 +54,43 @@
   }
 
   function letters(arr) { return arr.length ? arr.slice().sort().join('') : ''; }
+
+  /* ---------- 填空题判分 ---------- */
+  /* 规范化：全角转半角、去掉所有空白与标点，只留下「有意义的内容」。
+     这样 23：30 / 23:30 / 23点30分 的写法差异不会影响判分。 */
+  var PUNCT_RE = /[、，。；：,.;:·・'"“”‘’`()（）〈〉《》【】\[\]{}!！?？~～\-—_+=*/\\|&^%$#@<>]/g;
+  function normFill(s) {
+    return String(s == null ? '' : s)
+      .replace(/[\uFF01-\uFF5E]/g, function (c) {           // 全角字符 → 半角
+        return String.fromCharCode(c.charCodeAt(0) - 0xFEE0);
+      })
+      .replace(/[\s\u3000\u00a0]/g, '')
+      .replace(PUNCT_RE, '')
+      .toLowerCase();
+  }
+
+  function isBlankRight(blank, input) {
+    var n = normFill(input);
+    if (!n) return false;
+    var acc = blank.accept || [];
+    for (var i = 0; i < acc.length; i++) {
+      if (normFill(acc[i]) === n) return true;
+    }
+    var need = blank.need || [];
+    if (need.length) {
+      return need.every(function (t) { return n.indexOf(normFill(t)) > -1; });
+    }
+    return false;
+  }
+
+  /* 多空题：所有空都对才算答对（与多选题「必须完全一致」的口径保持一致） */
+  function isFillRight(item) {
+    if (!item.blanks.length) return false;
+    return item.blanks.every(function (b, i) { return isBlankRight(b, item.inputs[i]); });
+  }
+  function fillAnswered(item) {
+    return item.inputs.some(function (v) { return String(v || '').trim() !== ''; });
+  }
 
   function fmtTime(sec) {
     var m = Math.floor(sec / 60), s = sec % 60;
@@ -115,25 +164,28 @@
   function buildPaper(mode) {
     var paper = [];
     RULES.forEach(function (rule) {
-      var pool = BANKS[rule.bank] || [];
-      var singles = pool.filter(function (x) { return x.t !== 'M'; });
+      var pool    = BANKS[rule.bank] || [];
+      var fills   = pool.filter(function (x) { return x.t === 'F'; });
       var multis  = pool.filter(function (x) { return x.t === 'M'; });
+      var singles = pool.filter(function (x) { return x.t !== 'M' && x.t !== 'F'; });
 
-      if (rule.multi === null) {                       // 不限题型
-        shuffle(pool.slice()).slice(0, rule.total).forEach(function (q) {
-          paper.push(makeItem(rule.bank, q));
-        });
-      } else {
-        var needM = Math.min(rule.multi, multis.length);
-        var needS = Math.min(rule.total - needM, singles.length);
-        var picked = shuffle(multis.slice()).slice(0, needM)
-          .concat(shuffle(singles.slice()).slice(0, needS));
-        shuffle(picked).forEach(function (q) { paper.push(makeItem(rule.bank, q)); });
+      var picked = [];
+      if (rule.fill)   picked = picked.concat(shuffle(fills.slice()).slice(0, Math.min(rule.fill, fills.length)));
+      if (rule.multi)  picked = picked.concat(shuffle(multis.slice()).slice(0, Math.min(rule.multi, multis.length)));
+      if (rule.single) picked = picked.concat(shuffle(singles.slice()).slice(0, Math.min(rule.single, singles.length)));
+
+      var want = rule.fill + rule.multi + rule.single;
+      if (picked.length !== want) {
+        throw new Error('题库题量不足：「' + ((BANK_META[rule.bank] || {}).name || rule.bank) +
+          '」需要 ' + want + ' 题（填空 ' + rule.fill + ' / 多选 ' + rule.multi + ' / 单选 ' + rule.single +
+          '），实际只抽到 ' + picked.length + ' 题；该库现有填空 ' + fills.length +
+          ' 题、多选 ' + multis.length + ' 题、单选 ' + singles.length + ' 题。');
       }
+      shuffle(picked).forEach(function (q) { paper.push(makeItem(rule.bank, q)); });
     });
 
     if (mode === 'grouped') {
-      var order = ['saf', 'mil', 'stu'];
+      var order = ['zib', 'saf', 'mil', 'stu'];
       paper.sort(function (a, b) { return order.indexOf(a.bank) - order.indexOf(b.bank); });
     } else {
       shuffle(paper);
@@ -142,6 +194,16 @@
   }
 
   function makeItem(bank, q) {
+    if (q.t === 'F') {
+      var bl = q.blanks || [];
+      return {
+        bank: bank,
+        type: 'F',
+        stem: q.q,
+        blanks: bl.map(function (b) { return { ans: b.ans, accept: b.accept || [], need: b.need || [] }; }),
+        inputs: bl.map(function () { return ''; }),
+      };
+    }
     return {
       bank: bank,
       type: q.t === 'M' ? 'M' : 'S',
@@ -185,15 +247,21 @@
     filter: 'wrong',
     result: null,
     finishedAt: '',
+    violation: null,          // { code, detail, at }
+    timedOut: false,          // 是否因超时自动交卷
+    warned: 0,                // 已提示过的剩余时间档位
+    focusFill: false,
   };
 
   /* ---------- 首页 ---------- */
   function renderStart() {
+    var bankTotal = RULES.reduce(function (n, r) { return n + (BANKS[r.bank] || []).length; }, 0);
     var cards = [
-      { k: '全卷题量', v: TOTAL_Q, s: '题' },
+      { k: '全卷题量', v: TOTAL_Q, s: '题（填空 10 · 多选 10 · 单选 20）' },
       { k: '每题分值', v: PER_SCORE, s: '分' },
       { k: '试卷满分', v: FULL_SCORE, s: '分' },
-      { k: '题库总量', v: (BANKS.mil || []).length + (BANKS.stu || []).length + (BANKS.saf || []).length, s: '题（三库合并）' },
+      { k: '考核限时', v: 60, s: '分钟，到时自动交卷' },
+      { k: '题库总量', v: bankTotal, s: '题（四库合并）' },
     ];
     $('start-stats').innerHTML = cards.map(function (c) {
       return '<div class="stat"><div class="k">' + esc(c.k) + '</div>' +
@@ -203,12 +271,15 @@
     var rows = RULES.map(function (r) {
       var m = BANK_META[r.bank] || { name: r.bank };
       var pool = BANKS[r.bank] || [];
-      var multiPool = pool.filter(function (x) { return x.t === 'M'; }).length;
-      var typeTxt = r.multi === null
-        ? '随机抽 ' + r.total + ' 题（单选/多选不限）'
-        : '随机抽 ' + r.total + ' 题，其中多选 ' + r.multi + ' 题、单选 ' + (r.total - r.multi) + ' 题';
-      return '<li><b>' + esc(m.name) + '</b>：' + typeTxt +
-        '　<span class="hint">（题库 ' + pool.length + ' 题，含多选 ' + multiPool + ' 题）</span></li>';
+      var cnt = function (t) { return pool.filter(function (x) { return x.t === t; }).length; };
+      var parts = [];
+      if (r.fill)   parts.push('填空 <b>' + r.fill + '</b> 题');
+      if (r.multi)  parts.push('多选 <b>' + r.multi + '</b> 题');
+      if (r.single) parts.push('单选 <b>' + r.single + '</b> 题');
+      return '<li><b>' + esc(m.name) + '</b>：随机抽 ' + parts.join(' + ') +
+        '（共 ' + (r.fill + r.multi + r.single) + ' 题）　<span class="hint">（题库 ' + pool.length +
+        ' 题：填空 ' + cnt('F') + ' / 多选 ' + cnt('M') + ' / 单选 ' + (pool.length - cnt('F') - cnt('M')) +
+        '）</span></li>';
     }).join('');
     $('start-rules').innerHTML = rows;
 
@@ -292,14 +363,16 @@
       '<button class="btn btn-ghost" id="btn-clear">清空记录</button></div>' +
       '<div class="btable"><table><thead><tr>' +
       '<th>考试时间</th><th>姓名</th><th>班级</th><th>学号</th>' +
-      '<th>得分</th><th>答对</th><th>答错</th><th>未答</th><th>用时</th>' +
+      '<th>得分</th><th>答对</th><th>答错</th><th>未答</th><th>用时</th><th>状态</th>' +
       '</tr></thead><tbody>' +
       list.map(function (r) {
+        var st = r.violation ? '<span class="badge fail">' + esc(VIOLATIONS[r.violation] || '违规') + '</span>'
+          : (r.timeout ? '<span class="badge dup">超时</span>' : '<span class="badge pass">正常</span>');
         return '<tr><td class="num">' + esc(r.time) + '</td><td>' + esc(r.name) +
           '</td><td>' + esc(r.cls) + '</td><td class="who num">' + esc(r.sid) +
           '</td><td class="num">' + r.score + '</td><td class="num">' + r.right +
           '</td><td class="num">' + r.wrong + '</td><td class="num">' + r.blank +
-          '</td><td class="num">' + esc(r.used) + '</td></tr>';
+          '</td><td class="num">' + esc(r.used) + '</td><td>' + st + '</td></tr>';
       }).join('') +
       '</tbody></table></div>';
 
@@ -313,9 +386,10 @@
   function exportCsv() {
     var list = lsGet(LS_REC, []);
     if (!list.length) { toast('暂无记录'); return; }
-    var head = ['考试时间', '姓名', '班级', '学号', '得分', '答对', '答错', '未作答', '用时', '正确率'];
+    var head = ['考试时间', '姓名', '班级', '学号', '得分', '答对', '答错', '未作答', '用时', '正确率', '状态'];
     var rows = list.map(function (r) {
-      return [r.time, r.name, r.cls, r.sid, r.score, r.right, r.wrong, r.blank, r.used, r.rate];
+      return [r.time, r.name, r.cls, r.sid, r.score, r.right, r.wrong, r.blank, r.used, r.rate,
+        r.violation ? ('违规：' + (VIOLATIONS[r.violation] || r.violation)) : (r.timeout ? '超时自动交卷' : '正常')];
     });
     var csv = [head].concat(rows).map(function (row) {
       return row.map(function (c) {
@@ -353,6 +427,11 @@
       right_cnt: R.right, wrong_cnt: R.wrong, blank_cnt: R.blank,
       used_sec: S.elapsed,
       bank_json: R.byBank,
+      violation: S.violation ? S.violation.code : null,
+      violation_detail: S.violation ? (S.violation.detail || '') : null,
+      violated_at: S.violation ? S.violation.at.toISOString() : null,
+      timed_out: !!S.timedOut,
+      sound_monitored: !!GUARD.soundOk,
     };
   }
 
@@ -462,13 +541,233 @@
     window.scrollTo({ top: 0, behavior: 'auto' });
   }
 
+  /* ============================================================
+     考场行为管控
+     五类违规：退出界面 / 截屏 / 分屏 / 复制粘贴 / 环境声音
+     任一触发 → 立即交卷 + 结果页醒目提示 + 成绩随记录上报云端（教师端标红报警）
+     ============================================================ */
+  var GUARD = {
+    armed: false,          // 是否处于管控中（进入考试后开启）
+    fired: false,          // 本次考核是否已触发违规
+    suppressUntil: 0,      // 抑制窗口：全屏/授权弹窗自身造成的失焦不算违规
+    fsOk: false,           // 浏览器是否支持并成功进入全屏
+    soundOk: false,        // 是否成功开启麦克风声音监测
+    soundHits: 0,
+    soundPeak: 0,
+    soundTimer: null,
+    soundBuf: null,
+    audioCtx: null,
+    micStream: null,
+    splitSince: 0,
+    watchTimer: null,
+  };
+
+  var SOUND_THRESHOLD = 16;    // 时域峰值相对 128 的偏移量；安静时通常小于 6
+  var SOUND_STRIKES   = 12;    // 连续命中次数（每 100ms 一次，约 1.2 秒）
+  var SPLIT_MIN_SCREEN = 1100; // 屏幕窄于此值时不判定分屏（避免小屏误报）
+
+  /* 设定抑制窗口：ms 毫秒内不判定违规。
+     注意必须「直接覆盖」而不是取最大值——开考前的准备窗口（20 秒）会被进入考试后的
+     1.5 秒缓冲覆盖掉，否则考试开始后的前 20 秒管控形同虚设。 */
+  function suppressGuard(ms) {
+    GUARD.suppressUntil = Date.now() + ms;
+  }
+  function guardActive() {
+    return GUARD.armed && !GUARD.fired && !S.graded && Date.now() >= GUARD.suppressUntil;
+  }
+
+  function trip(code, detail) {
+    if (!guardActive()) return false;
+    GUARD.fired = true;
+    S.violation = { code: code, detail: detail, at: new Date() };
+    try { grade({ violation: S.violation }); } catch (e) {}
+    showViolationMask();
+    return true;
+  }
+
+  function armGuard() {
+    GUARD.armed = true;
+    GUARD.fired = false;
+    GUARD.splitSince = 0;
+    S.violation = null;
+    S.timedOut = false;
+    S.warned = 0;
+  }
+  function disarmGuard() {
+    GUARD.armed = false;
+    stopSoundMonitor();
+    clearInterval(GUARD.watchTimer);
+    GUARD.watchTimer = null;
+  }
+
+  /* ---- 全屏 ---- */
+  function requestExamFullscreen() {
+    var el = document.documentElement;
+    if (!el.requestFullscreen) { GUARD.fsOk = false; return Promise.resolve(false); }
+    return Promise.resolve(el.requestFullscreen()).then(function () {
+      GUARD.fsOk = true;
+      return true;
+    }).catch(function () { GUARD.fsOk = false; return false; });
+  }
+  function exitExamFullscreen() {
+    if (document.fullscreenElement && document.exitFullscreen) {
+      try { document.exitFullscreen(); } catch (e) {}
+    }
+  }
+
+  /* ---- 环境声音（麦克风 + Web Audio） ---- */
+  function startSoundMonitor() {
+    var md = navigator.mediaDevices;
+    if (!md || !md.getUserMedia) { GUARD.soundOk = false; return Promise.resolve(false); }
+    return Promise.resolve(md.getUserMedia({ audio: true })).then(function (stream) {
+      GUARD.micStream = stream;
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) { GUARD.soundOk = false; return false; }
+      var ctx = new Ctx();
+      if (ctx.state === 'suspended' && ctx.resume) { try { ctx.resume(); } catch (e) {} }
+      var analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      GUARD.audioCtx = ctx;
+      GUARD.soundBuf = new Uint8Array(analyser.fftSize);
+      GUARD.soundOk = true;
+      GUARD.soundTimer = setInterval(function () {
+        if (!guardActive() || !GUARD.soundBuf) return;
+        analyser.getByteTimeDomainData(GUARD.soundBuf);
+        var peak = 0;
+        for (var i = 0; i < GUARD.soundBuf.length; i++) {
+          var d = Math.abs(GUARD.soundBuf[i] - 128);
+          if (d > peak) peak = d;
+        }
+        if (peak > GUARD.soundPeak) GUARD.soundPeak = peak;
+        if (peak > SOUND_THRESHOLD) GUARD.soundHits++;
+        else if (GUARD.soundHits > 0) GUARD.soundHits--;
+        if (GUARD.soundHits >= SOUND_STRIKES) {
+          trip('sound', '检测到持续环境声音（峰值 ' + peak + '/128，持续约 ' +
+            (SOUND_STRIKES / 10).toFixed(1) + ' 秒）');
+        }
+      }, 100);
+      return true;
+    }).catch(function () { GUARD.soundOk = false; return false; });
+  }
+  function stopSoundMonitor() {
+    clearInterval(GUARD.soundTimer);
+    GUARD.soundTimer = null;
+    try { if (GUARD.micStream) GUARD.micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
+    try { if (GUARD.audioCtx && GUARD.audioCtx.close) GUARD.audioCtx.close(); } catch (e) {}
+    GUARD.micStream = null;
+    GUARD.audioCtx = null;
+  }
+
+  /* ---- 事件监听（常驻注册，靠 guardActive() 判断是否生效） ---- */
+  document.addEventListener('visibilitychange', function () {
+    if (!guardActive()) return;
+    if (document.hidden) trip('leave', '切换到其他标签页 / 最小化了窗口');
+  });
+
+  window.addEventListener('blur', function () {
+    if (!guardActive()) return;
+    trip('leave', '考试窗口失去焦点（切到了别的窗口或程序）');
+  });
+
+  window.addEventListener('pagehide', function () {
+    if (!guardActive()) return;
+    trip('leave', '离开了考试页面');
+  });
+
+  document.addEventListener('fullscreenchange', function () {
+    if (!guardActive() || !GUARD.fsOk) return;
+    if (!document.fullscreenElement) trip('split', '退出了全屏（可能进入了分屏或调整了窗口）');
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (!guardActive()) return;
+    if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+      trip('screenshot', '按下截屏键 PrintScreen');
+      return;
+    }
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      var k = String(e.key || '').toLowerCase();
+      if (k === 'c' || k === 'x' || k === 'v') {
+        trip('copy', '使用快捷键 ' + (e.metaKey ? 'Cmd' : 'Ctrl') + '+' + k.toUpperCase());
+      }
+    }
+  }, true);
+
+  ['copy', 'cut', 'paste'].forEach(function (ev) {
+    var label = { copy: '复制', cut: '剪切', paste: '粘贴' }[ev];
+    document.addEventListener(ev, function (e) {
+      if (e.preventDefault) e.preventDefault();
+      if (!guardActive()) return;
+      trip('copy', '触发了' + label + '操作');
+    }, true);
+  });
+
+  document.addEventListener('contextmenu', function (e) {
+    if (e.preventDefault) e.preventDefault();
+    if (!guardActive()) return;
+    trip('copy', '打开了右键菜单');
+  }, true);
+
+  /* ---- 周期性巡检：分屏 / 全屏状态 ---- */
+  function checkSplit() {
+    if (!guardActive()) { GUARD.splitSince = 0; return; }
+    var sw = (window.screen && window.screen.availWidth) || 0;
+    var w = window.outerWidth || window.innerWidth || 0;
+    if (sw < SPLIT_MIN_SCREEN || !w) { GUARD.splitSince = 0; return; }
+    if (w < sw * 0.85) {
+      if (!GUARD.splitSince) GUARD.splitSince = Date.now();
+      else if (Date.now() - GUARD.splitSince > 1500) {
+        trip('split', '窗口宽度仅占屏幕的 ' + Math.round(w / sw * 100) + '%（疑似分屏）');
+      }
+    } else {
+      GUARD.splitSince = 0;
+    }
+  }
+  window.addEventListener('resize', checkSplit);
+  function startGuardWatch() {
+    clearInterval(GUARD.watchTimer);
+    GUARD.watchTimer = setInterval(checkSplit, 1000);
+  }
+
   /* ---------- 开始考试 ---------- */
+  function withTimeout(p, ms, fallback) {
+    return Promise.race([
+      Promise.resolve(p).catch(function () { return fallback; }),
+      new Promise(function (r) { setTimeout(function () { r(fallback); }, ms); }),
+    ]);
+  }
+
   function beginExam() {
     var id = readIdentity();
-    if (!id) return;                 // 信息不完整，阻止进入考试
+    if (!id) return;                       // 信息不完整，阻止进入考试
+    if ($('agree-rules') && !$('agree-rules').checked) {
+      $('agree-msg').hidden = false;
+      toast('请先阅读并勾选考试须知');
+      return;
+    }
+    if ($('agree-msg')) $('agree-msg').hidden = true;
     S.examinee = id;
     lsSet(LS_ID, id);
-    startExam();
+
+    var btn = $('btn-start');
+    btn.disabled = true;
+    btn.textContent = '正在准备考场…';
+    suppressGuard(20000);                  // 全屏 + 麦克风授权期间自身造成的失焦不算违规
+
+    requestExamFullscreen().then(function () {
+      return withTimeout(startSoundMonitor(), 15000, false);
+    }).then(function () {
+      btn.disabled = false;
+      btn.textContent = '开始答题';
+      startExam();
+      startGuardWatch();
+      suppressGuard(1500);                 // 进入考试后留 1.5 秒缓冲，避免首帧误判
+    }).catch(function () {
+      btn.disabled = false;
+      btn.textContent = '开始答题';
+      startExam();
+    });
   }
 
   function startExam() {
@@ -478,6 +777,7 @@
     S.filter = 'wrong';
     S.startAt = Date.now();
     S.elapsed = 0;
+    S.finishedAt = '';
     Array.prototype.forEach.call($('filter-seg').children, function (c) {
       c.classList.toggle('on', c.dataset.f === 'wrong');
     });
@@ -485,61 +785,164 @@
     $('btn-submit-top').disabled = false;
     uploadState = { status: 'idle', msg: '', sub: '' };
     renderUpload();
+    $('violation-mask').hidden = true;
+    renderGuardStatus();
     $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
+    armGuard();
     startTimer();
     show('exam');
     renderExam();
+  }
+
+  /* ---------- 倒计时（限时 1 小时，归零自动交卷） ---------- */
+  function secondsLeft() {
+    return Math.max(0, LIMIT_SEC - Math.floor((Date.now() - S.startAt) / 1000));
   }
 
   function startTimer() {
     clearInterval(S.timer);
     updateTimer();
     S.timer = setInterval(function () {
-      S.elapsed = Math.floor((Date.now() - S.startAt) / 1000);
       updateTimer();
+      if (secondsLeft() <= 0) {
+        stopTimer();
+        if (!S.graded) grade({ timeout: true });
+      }
     }, 1000);
   }
-  function updateTimer() { $('pill-timer').textContent = '用时 ' + fmtTime(S.elapsed); }
+
+  function updateTimer() {
+    var left = secondsLeft();
+    S.elapsed = LIMIT_SEC - left;
+    var pill = $('pill-timer');
+    pill.className = 'pill' + (left <= 300 ? ' pill-danger' : (left <= 600 ? ' pill-warn' : ''));
+    pill.innerHTML = '剩余 <b>' + fmtTime(left) + '</b>';
+
+    var banner = $('time-banner');
+    if (banner) {
+      if (left <= 600) {
+        banner.hidden = false;
+        banner.textContent = '⏰ 距离交卷还剩 ' + fmtTime(left) + '，到时将自动交卷。';
+      } else {
+        banner.hidden = true;
+      }
+    }
+    var level = left <= 60 ? 60 : (left <= 300 ? 300 : (left <= 600 ? 600 : 0));
+    if (level && level !== S.warned) {
+      S.warned = level;
+      toast('剩余时间不足 ' + (level / 60) + ' 分钟');
+    }
+  }
   function stopTimer() { clearInterval(S.timer); S.timer = null; }
 
+  /* 考场状态条：说明当前哪几项管控已生效 */
+  function renderGuardStatus() {
+    var el = $('guard-status');
+    if (!el) return;
+    var items = [
+      ['退出/切屏拦截', true],
+      ['截屏拦截', true],
+      ['全屏与分屏拦截', GUARD.fsOk],
+      ['复制粘贴拦截', true],
+      ['环境声音监测', GUARD.soundOk],
+    ];
+    el.innerHTML = items.map(function (it) {
+      return '<span class="gitem ' + (it[1] ? 'on' : 'off') + '">' + (it[1] ? '✔' : '✖') + ' ' + esc(it[0]) + '</span>';
+    }).join('') +
+      (GUARD.soundOk ? '' : '<span class="gnote">未取得麦克风授权，本次不监测环境声音（成绩单会如实标注）</span>');
+  }
+
   /* ---------- 渲染答题页 ---------- */
+  /* 填空题题干：把 ____ 换成行内输入框，保持句子连贯 */
+  function fillStemHtml(item) {
+    var parts = String(item.stem).split('____');
+    var out = '';
+    for (var i = 0; i < parts.length; i++) {
+      out += esc(parts[i]);
+      if (i < parts.length - 1) {
+        var a = item.blanks[i] && item.blanks[i].ans ? String(item.blanks[i].ans) : '';
+        var w = Math.max(4, Math.min(16, a.length + 2));
+        out += '<input class="fillin" type="text" data-blank="' + i + '" size="' + w + '"' +
+          ' autocomplete="off" autocapitalize="off" spellcheck="false"' +
+          ' value="' + esc(item.inputs[i] || '') + '" placeholder="第 ' + (i + 1) + ' 空">';
+      }
+    }
+    return out;
+  }
+
+  function isAnswered(it) {
+    if (it.type === 'F') return fillAnswered(it);
+    return it.picked.length > 0;
+  }
+
   function renderExam() {
     var item = S.paper[S.idx];
     if (!item) return;
     var meta = BANK_META[item.bank] || { short: item.bank };
     var isMulti = item.type === 'M';
+    var isFill = item.type === 'F';
+
+    var typeLabel = isFill ? '填空' : (isMulti ? '多选' : '单选');
+    var typeCls = isFill ? 'tag-fill' : (isMulti ? 'tag-multi' : 'tag-single');
 
     var html = '';
     html += '<div class="qhead">';
     html += '<span class="qno">第 ' + (S.idx + 1) + ' 题 / ' + TOTAL_Q + '</span>';
-    html += '<span class="tag ' + (isMulti ? 'tag-multi' : 'tag-single') + '">' +
-      (isMulti ? '多选' : '单选') + '</span>';
+    html += '<span class="tag ' + typeCls + '">' + typeLabel + '</span>';
     html += '<span class="tag tag-bank">' + esc(meta.short) + '</span>';
+    if (isFill) html += '<span class="tag tag-bank">共 ' + item.blanks.length + ' 空</span>';
     html += '</div>';
-    html += '<div class="qstem">' + esc(item.stem) + '</div>';
-    html += '<div class="opts">';
-    item.options.forEach(function (o, i) {
-      var on = item.picked.indexOf(o[0]) > -1;
-      html += '<button type="button" class="opt' + (on ? ' on' : '') + '" data-opt="' + esc(o[0]) + '">' +
-        '<span class="box' + (isMulti ? '' : ' round') + '">' + esc(o[0]) + '</span>' +
-        '<span class="txt">' + esc(o[1]) + '</span></button>';
-    });
-    html += '</div>';
+
+    if (isFill) {
+      html += '<div class="qstem fill-stem">' + fillStemHtml(item) + '</div>';
+      html += '<p class="fill-tip">只填写空格处的内容，不要抄写题干；' +
+        (item.blanks.length > 1 ? '本题共 ' + item.blanks.length + ' 空，<b>全部答对才得分</b>；' : '') +
+        '标点、全半角、写法差异不影响判分。</p>';
+    } else {
+      html += '<div class="qstem">' + esc(item.stem) + '</div>';
+      html += '<div class="opts">';
+      item.options.forEach(function (o) {
+        var on = item.picked.indexOf(o[0]) > -1;
+        html += '<button type="button" class="opt' + (on ? ' on' : '') + '" data-opt="' + esc(o[0]) + '">' +
+          '<span class="box' + (isMulti ? '' : ' round') + '">' + esc(o[0]) + '</span>' +
+          '<span class="txt">' + esc(o[1]) + '</span></button>';
+      });
+      html += '</div>';
+    }
+
     html += '<div class="qnav">' +
       '<button class="btn btn-ghost" id="btn-prev"' + (S.idx === 0 ? ' disabled' : '') + '>上一题</button>' +
-      '<span class="hint">' + (isMulti ? '多选题：可选择多个选项' : '单选题：选择 1 个选项') + '</span>' +
+      '<span class="hint">' + (isFill ? '填空题：直接输入答案' : (isMulti ? '多选题：可选择多个选项' : '单选题：选择 1 个选项')) + '</span>' +
       '<div class="spacer"></div>' +
-      '<span class="hint">按 <kbd>A</kbd>~<kbd>H</kbd> 或 <kbd>1</kbd>~<kbd>8</kbd> 选择，<kbd>←</kbd><kbd>→</kbd> 翻页</span>' +
+      '<span class="hint">' + (isFill ? '用鼠标或 <kbd>Tab</kbd> 在空格间切换'
+        : '按 <kbd>A</kbd>~<kbd>H</kbd> 或 <kbd>1</kbd>~<kbd>8</kbd> 选择') +
+      '，<kbd>←</kbd><kbd>→</kbd> 翻页</span>' +
       '<button class="btn ' + (S.idx === TOTAL_Q - 1 ? 'btn-ghost' : 'btn-primary') + '" id="btn-next">' +
       (S.idx === TOTAL_Q - 1 ? '最后一题' : '下一题') + '</button>' +
       '</div>';
 
     $('qcard').innerHTML = html;
 
-    $('qcard').querySelector('.opts').addEventListener('click', function (e) {
-      var btn = e.target.closest('.opt'); if (!btn) return;
-      pick(btn.dataset.opt);
-    });
+    if (isFill) {
+      var inputs = $('qcard').querySelectorAll('.fillin');
+      Array.prototype.forEach.call(inputs, function (inp) {
+        inp.addEventListener('input', function () {
+          var k = parseInt(this.dataset.blank, 10);
+          item.inputs[k] = this.value;
+          renderCards();
+          renderProgress();
+        });
+      });
+      var first = inputs[0];
+      if (first && S.focusFill) { try { first.focus(); } catch (e) {} }
+      S.focusFill = false;
+    } else {
+      $('qcard').querySelector('.opts').addEventListener('click', function (e) {
+        var btn = e.target.closest('.opt'); if (!btn) return;
+        pick(btn.dataset.opt);
+      });
+    }
+
     $('btn-prev').addEventListener('click', function () { go(S.idx - 1); });
     $('btn-next').addEventListener('click', function () { go(S.idx + 1); });
 
@@ -549,13 +952,13 @@
 
   function renderCards() {
     $('cards').innerHTML = S.paper.map(function (it, i) {
-      var cls = 'cell' + (it.picked.length ? ' done' : '') + (i === S.idx ? ' cur' : '');
+      var cls = 'cell' + (isAnswered(it) ? ' done' : '') + (i === S.idx ? ' cur' : '');
       return '<button class="' + cls + '" data-i="' + i + '">' + (i + 1) + '</button>';
     }).join('');
   }
 
   function renderProgress() {
-    var done = S.paper.filter(function (it) { return it.picked.length; }).length;
+    var done = S.paper.filter(isAnswered).length;
     $('pill-progress').innerHTML = '已答 <b>' + done + '</b>/' + TOTAL_Q;
     $('bar-fill').style.width = (done / TOTAL_Q * 100) + '%';
   }
@@ -567,7 +970,7 @@
 
   function pick(label) {
     var item = S.paper[S.idx];
-    if (S.graded) return;
+    if (S.graded || !item || item.type === 'F') return;
     if (item.type === 'M') {
       var i = item.picked.indexOf(label);
       if (i > -1) item.picked.splice(i, 1); else item.picked.push(label);
@@ -586,7 +989,7 @@
 
   /* ---------- 交卷与判分 ---------- */
   function submit() {
-    var blank = S.paper.filter(function (it) { return !it.picked.length; }).length;
+    var blank = S.paper.filter(function (it) { return !isAnswered(it); }).length;
     var tip = blank
       ? '还有 <b>' + blank + '</b> 道题未作答，未作答的题目将按答错计分。<br>确定现在交卷吗？'
       : '确定交卷并判分吗？';
@@ -595,17 +998,29 @@
     });
   }
 
-  function grade() {
+  function isItemRight(it) {
+    if (it.type === 'F') return isFillRight(it);
+    return it.picked.length > 0 && sameSet(it.picked, it.answer);
+  }
+
+  function grade(opts) {
+    if (S.graded) return;
+    opts = opts || {};
     stopTimer();
+    disarmGuard();
+    exitExamFullscreen();
     S.elapsed = Math.floor((Date.now() - S.startAt) / 1000);
+    if (S.elapsed > LIMIT_SEC) S.elapsed = LIMIT_SEC;
     S.finishedAt = fmtDate();
     S.graded = true;
+    if (opts.violation) S.violation = opts.violation;
+    if (opts.timeout) S.timedOut = true;
 
     var right = 0, wrong = 0, blank = 0, items = [];
     var byBank = {};
     S.paper.forEach(function (it, i) {
-      var ok = it.picked.length > 0 && sameSet(it.picked, it.answer);
-      var blankQ = it.picked.length === 0;
+      var ok = isItemRight(it);
+      var blankQ = !isAnswered(it);
       if (ok) right++; else { wrong++; if (blankQ) blank++; }
       items.push({ no: i + 1, item: it, ok: ok, blank: blankQ });
 
@@ -625,11 +1040,25 @@
       name: S.examinee.name, cls: S.examinee.cls, sid: S.examinee.sid,
       score: Math.round(score * 100) / 100, right: right, wrong: wrong, blank: blank,
       used: fmtTime(S.elapsed), rate: Math.round(right / TOTAL_Q * 100) + '%',
+      violation: S.violation ? S.violation.code : '',
+      timeout: !!S.timedOut,
     });
 
     renderResult();
     show('result');
-    submitUpload(false);          // 自动上传成绩（失败则本机暂存，可重试）
+    submitUpload(false);          // 交卷即上传（违规记录同样立即上报，教师端随即报警）
+  }
+
+  /* ---------- 违规提示 ---------- */
+  function showViolationMask() {
+    var mask = $('violation-mask');
+    if (!mask) return;
+    var v = S.violation || {};
+    $('violation-text').innerHTML =
+      '<b>' + esc(VIOLATIONS[v.code] || v.code || '违规行为') + '</b>' +
+      (v.detail ? '：' + esc(v.detail) : '') +
+      '<br><span class="hint">系统已立即交卷，并把本次违规上报教师端（成绩单状态标记为违规）。</span>';
+    mask.hidden = false;
   }
 
   /* ---------- 渲染结果页 ---------- */
@@ -659,6 +1088,27 @@
     else                   { verdict = '未及格'; sub = '别急，先按错题回溯逐题复盘，再重新抽一套练手。'; }
     $('verdict').textContent = verdict + '　·　得分 ' + (score % 1 === 0 ? score : score.toFixed(1)) + ' 分';
     $('verdict-sub').textContent = sub;
+
+    /* 违规 / 超时提示条 */
+    var vb = $('result-violation');
+    if (vb) {
+      if (S.violation) {
+        vb.hidden = false;
+        vb.className = 'result-alert bad';
+        vb.innerHTML = '<b>本次考核已被判定为违规</b>　' +
+          esc(VIOLATIONS[S.violation.code] || S.violation.code) +
+          (S.violation.detail ? '：' + esc(S.violation.detail) : '') +
+          '<br><span class="hint">记录已实时上报教师端，教师名单中该条成绩会标红显示。</span>';
+      } else if (S.timedOut) {
+        vb.hidden = false;
+        vb.className = 'result-alert warn';
+        vb.innerHTML = '<b>答题时间已用完，系统自动交卷</b>' +
+          '<br><span class="hint">限时 60 分钟，超时自动交卷不属于违规行为。</span>';
+      } else {
+        vb.hidden = true;
+        vb.innerHTML = '';
+      }
+    }
 
     $('examinee-line').innerHTML =
       '<span>姓名：<b>' + esc(S.examinee.name) + '</b></span>' +
@@ -717,9 +1167,43 @@
     $('review-list').innerHTML = list.map(function (rec) {
       var it = rec.item;
       var meta = BANK_META[it.bank] || { short: it.bank };
+      var isFill = it.type === 'F';
       var isMulti = it.type === 'M';
-      var picked = it.picked;
+      var typeLabel = isFill ? '填空' : (isMulti ? '多选' : '单选');
+      var typeCls = isFill ? 'tag-fill' : (isMulti ? 'tag-multi' : 'tag-single');
 
+      var head = '<div class="rhead">' +
+        '<span class="qno">第 ' + rec.no + ' 题</span>' +
+        '<span class="tag ' + typeCls + '">' + typeLabel + '</span>' +
+        '<span class="tag tag-bank">' + esc(meta.name) + '</span>' +
+        '<span class="verdict-chip ' + (rec.ok ? 'good' : 'bad') + '">' +
+        (rec.ok ? '答对' : (rec.blank ? '未作答' : '答错')) + '</span>' +
+        '</div>';
+
+      if (isFill) {
+        var filled = String(it.stem);
+        it.blanks.forEach(function (b) { filled = filled.replace('____', '【' + b.ans + '】'); });
+        var blanks = it.blanks.map(function (b, bi) {
+          var raw = String(it.inputs[bi] || '').trim();
+          var okB = isBlankRight(b, it.inputs[bi]);
+          return '<div class="rblank ' + (okB ? 'correct' : 'chosen-wrong') + '">' +
+            '<span class="lb">第 ' + (bi + 1) + ' 空</span>' +
+            '<span class="yv">你的答案：<b>' + esc(raw || '未作答') + '</b></span>' +
+            '<span class="rb ' + (okB ? 'ok' : 'no') + '">' + (okB ? '正确' : '错误') + '</span>' +
+            '</div>';
+        }).join('');
+        var std = it.blanks.map(function (b) { return b.ans; }).join('　|　');
+        return '<div class="review ' + (rec.ok ? 'right' : 'wrong') + '">' + head +
+          '<div class="stem">' + esc(it.stem) + '</div>' +
+          '<div class="rblanks">' + blanks + '</div>' +
+          '<div class="answers">' +
+          '<span class="kv hit">标准答案：<b>' + esc(std) + '</b></span>' +
+          '</div>' +
+          '<div class="fill-ref">参考答案：' + esc(filled) + '</div>' +
+          '</div>';
+      }
+
+      var picked = it.picked;
       var opts = it.options.map(function (o) {
         var isAns = it.answer.indexOf(o[0]) > -1;
         var isPick = picked.indexOf(o[0]) > -1;
@@ -734,14 +1218,7 @@
       var your = picked.length ? letters(picked) : '未作答';
       var okAns = letters(it.answer);
 
-      return '<div class="review ' + (rec.ok ? 'right' : 'wrong') + '">' +
-        '<div class="rhead">' +
-        '<span class="qno">第 ' + rec.no + ' 题</span>' +
-        '<span class="tag ' + (isMulti ? 'tag-multi' : 'tag-single') + '">' + (isMulti ? '多选' : '单选') + '</span>' +
-        '<span class="tag tag-bank">' + esc(meta.name) + '</span>' +
-        '<span class="verdict-chip ' + (rec.ok ? 'good' : 'bad') + '">' +
-        (rec.ok ? '答对' : (rec.blank ? '未作答' : '答错')) + '</span>' +
-        '</div>' +
+      return '<div class="review ' + (rec.ok ? 'right' : 'wrong') + '">' + head +
         '<div class="stem">' + esc(it.stem) + '</div>' +
         '<div class="ropts">' + opts + '</div>' +
         '<div class="answers">' +
@@ -794,6 +1271,11 @@
     h.push('<table><tr><th>最终得分</th><th>试卷满分</th><th>答对</th><th>答错</th><th>未作答</th><th>正确率</th></tr>');
     h.push('<tr><td>' + score + '</td><td>100</td><td>' + R.right + '</td><td>' + R.wrong +
       '</td><td>' + R.blank + '</td><td>' + (R.right / TOTAL_Q * 100).toFixed(0) + '%</td></tr></table>');
+    h.push('<p class="note">考核限时 60 分钟，实际用时 ' + fmtTime(S.elapsed) + '。' +
+      (S.violation
+        ? '<b>考核状态：违规（' + esc(VIOLATIONS[S.violation.code] || S.violation.code) + '）</b>，系统已立即交卷。'
+        : (S.timedOut ? '<b>考核状态：超时自动交卷</b>。' : '考核状态：正常交卷。')) +
+      '　环境声音监测：' + (GUARD.soundOk ? '已开启' : '未开启（未取得麦克风授权）') + '。</p>');
 
     h.push('<h2>二、分题库得分</h2>');
     h.push('<table><tr><th>来源题库</th><th>抽题数</th><th>答对</th><th>答错</th><th>得分</th></tr>');
@@ -818,6 +1300,26 @@
     R.items.forEach(function (rec) {
       var it = rec.item;
       var meta = BANK_META[it.bank] || { name: it.bank };
+      var verdict = rec.ok ? '【答对】' : (rec.blank ? '【未作答】' : '【答错】');
+      var typeTxt = it.type === 'F' ? '［填空］' : (it.type === 'M' ? '［多选］' : '［单选］');
+
+      if (it.type === 'F') {
+        var lines = it.blanks.map(function (b, bi) {
+          var raw = String(it.inputs[bi] || '').trim();
+          var okB = isBlankRight(b, it.inputs[bi]);
+          return '<p class="qo ' + (okB ? 'ok' : 'no') + '">第 ' + (bi + 1) + ' 空：' +
+            esc(raw || '未作答') + '　→　标准答案 ' + esc(b.ans) + (okB ? '　√' : '　×') + '</p>';
+        }).join('');
+        var ref = String(it.stem);
+        it.blanks.forEach(function (b) { ref = ref.replace('____', '【' + b.ans + '】'); });
+        h.push('<div class="q">' +
+          '<p class="qt">第 ' + rec.no + ' 题　' + typeTxt + ' ' + esc(meta.name) + '　' + verdict + '</p>' +
+          '<p class="qs">' + esc(it.stem) + '</p>' + lines +
+          '<p class="qa">参考答案：' + esc(ref) + '</p>' +
+          '</div>');
+        return;
+      }
+
       var opts = it.options.map(function (o) {
         var isAns = it.answer.indexOf(o[0]) > -1;
         var isPick = it.picked.indexOf(o[0]) > -1;
@@ -825,9 +1327,8 @@
         var mark = isAns ? '　【正确答案】' : (isPick ? '　【误选】' : '');
         return '<p class="' + cls + '">' + esc(o[0]) + '．' + esc(o[1]) + mark + '</p>';
       }).join('');
-      var verdict = rec.ok ? '【答对】' : (rec.blank ? '【未作答】' : '【答错】');
       h.push('<div class="q">' +
-        '<p class="qt">第 ' + rec.no + ' 题　' + (it.type === 'M' ? '［多选］' : '［单选］') +
+        '<p class="qt">第 ' + rec.no + ' 题　' + typeTxt +
         ' ' + esc(meta.name) + '　' + verdict + '</p>' +
         '<p class="qs">' + esc(it.stem) + '</p>' + opts +
         '<p class="qa">你的答案：' + esc(it.picked.length ? letters(it.picked) : '未作答') +
@@ -854,22 +1355,35 @@
   }
 
   /* ---------- 键盘 ---------- */
+  function inTextField(t) {
+    if (!t) return false;
+    var tag = t.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable === true;
+  }
+
   document.addEventListener('keydown', function (e) {
+    if ($('violation-mask') && !$('violation-mask').hidden) {
+      if (e.key === 'Escape' || e.key === 'Enter') $('violation-mask').hidden = true;
+      return;
+    }
     if ($('modal-mask').classList.contains('open')) {
       if (e.key === 'Escape') closeModal(false);
       if (e.key === 'Enter') closeModal(true);
       return;
     }
     if (!$('screen-exam').classList.contains('active') || S.graded) return;
+    if (inTextField(e.target)) return;        // 填空输入框内让方向键/字母正常输入
+
     var k = e.key;
     if (k === 'ArrowLeft')  { go(S.idx - 1); e.preventDefault(); return; }
     if (k === 'ArrowRight') { go(S.idx + 1); e.preventDefault(); return; }
 
+    var it = S.paper[S.idx];
+    if (!it || it.type === 'F' || !it.options) return;
     var idx = -1;
     if (/^[a-hA-H]$/.test(k)) idx = k.toUpperCase().charCodeAt(0) - 65;
     else if (/^[1-8]$/.test(k)) idx = parseInt(k, 10) - 1;
     if (idx < 0) return;
-    var it = S.paper[S.idx];
     if (idx < it.options.length) { pick(it.options[idx][0]); e.preventDefault(); }
   });
 
@@ -878,6 +1392,15 @@
   $('btn-submit').addEventListener('click', submit);
   $('btn-submit-top').addEventListener('click', submit);
   $('btn-doc').addEventListener('click', downloadDoc);
+
+  if ($('violation-ok')) {
+    $('violation-ok').addEventListener('click', function () { $('violation-mask').hidden = true; });
+  }
+  if ($('agree-rules')) {
+    $('agree-rules').addEventListener('change', function () {
+      if (this.checked && $('agree-msg')) $('agree-msg').hidden = true;
+    });
+  }
 
   $('btn-abort').addEventListener('click', function () {
     confirmBox('退出考试', '退出后当前试卷的作答将会丢失，确定退出吗？', '退出', '继续答题')

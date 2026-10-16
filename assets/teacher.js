@@ -9,7 +9,16 @@
   var CC = window.CLOUD_CONFIG || null;
   var LS_KEY = 'quiz.teacherkey';
   var FULL_SCORE = 100, PASS_SCORE = 60, TOTAL_Q = 40, PER_SCORE = 2.5;
-  var AUTO_MS = 30000;                 // 看板自动刷新间隔
+  var AUTO_MS = 15000;                 // 看板自动刷新间隔（有违规报警，刷新更勤）
+
+  /* 违规类型：与 app.js 的 VIOLATIONS 保持一致 */
+  var VIO_LABEL = {
+    leave:      '退出考试界面',
+    screenshot: '截屏',
+    split:      '分屏 / 调整窗口',
+    copy:       '复制粘贴',
+    sound:      '环境声音',
+  };
 
   /* ---------- 基础工具 ---------- */
   var $ = function (id) { return document.getElementById(id); };
@@ -106,6 +115,7 @@
     view: [],                        // 筛选 + 去重，用于明细与导出
     filterCls: '',
     filterText: '',
+    onlyVio: false,                  // 仅看违规
     sort: 'time-desc',
     dedupe: true,
     lastSync: '',
@@ -226,7 +236,16 @@
       time: fmtLocal(r.created_at),
       ts: new Date(r.created_at).getTime() || 0,
       pass: score >= PASS_SCORE,
+      violation: r.violation || '',
+      vioDetail: r.violation_detail || '',
+      violatedAt: r.violated_at ? fmtLocal(r.violated_at) : '',
+      timedOut: !!r.timed_out,
+      soundMonitored: !!r.sound_monitored,
     };
+  }
+
+  function vioText(r) {
+    return VIO_LABEL[r.violation] || r.violation || '违规';
   }
 
   /* ---------- 视图计算 ---------- */
@@ -234,6 +253,8 @@
     var all = S.rows.slice();
 
     if (S.filterCls) all = all.filter(function (r) { return r.cls === S.filterCls; });
+
+    if (S.onlyVio) all = all.filter(function (r) { return !!r.violation; });
 
     if (S.filterText) {
       var kw = S.filterText.toLowerCase();
@@ -307,6 +328,8 @@
     var uniqN = Object.keys(uniq).length;
     var dupN = S.viewAll.length - uniqN;
 
+    var vioN = S.viewAll.filter(function (r) { return !!r.violation; }).length;
+
     // 统计卡
     var cards = [
       { k: '参考人数', v: uniqN, s: '人（去重学号）', cls: 'brand' },
@@ -315,6 +338,7 @@
       { k: '最高分', v: st.max === null ? '—' : fmtNum(st.max), s: '分', cls: 'ok' },
       { k: '最低分', v: st.min === null ? '—' : fmtNum(st.min), s: '分', cls: st.min !== null && st.min < PASS_SCORE ? 'bad' : '' },
       { k: '及格率', v: st.n ? st.passRate.toFixed(1) + '%' : '—', s: st.n ? st.pass + ' / ' + st.n + ' 人及格' : '暂无数据', cls: st.n && st.passRate >= 60 ? 'ok' : 'bad' },
+      { k: '违规记录', v: vioN, s: vioN ? '条，需人工复核' : '暂无违规', cls: vioN ? 'bad' : '' },
       { k: '平均用时', v: st.avgUsed == null ? '—' : fmtSec(st.avgUsed), s: 'mm:ss' },
     ];
     $('stat-grid').innerHTML = cards.map(function (c) {
@@ -323,7 +347,32 @@
     }).join('');
 
     renderClassFilter();
+    renderAlarm();
     renderTable(list, st);
+  }
+
+  /* ---------- 违规报警区 ---------- */
+  function renderAlarm() {
+    var box = $('alarm-box');
+    if (!box) return;
+    var vios = S.rows.filter(function (r) { return !!r.violation; })
+      .sort(function (a, b) { return b.ts - a.ts; });
+    if (!vios.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML =
+      '<div class="alarm-head"><span class="alarm-dot"></span><b>违规报警</b>' +
+      '<span class="hint">共 ' + vios.length + ' 条，按时间倒序；完整名单见下方明细表</span></div>' +
+      '<div class="alarm-list">' +
+      vios.slice(0, 8).map(function (r) {
+        return '<div class="alarm-row">' +
+          '<span class="a-kind">' + esc(vioText(r)) + '</span>' +
+          '<span class="a-who">' + esc(r.name) + '　' + esc(r.cls) + '　' + esc(r.sid) + '</span>' +
+          '<span class="a-time">' + esc(r.violatedAt || r.time) + '</span>' +
+          (r.vioDetail ? '<span class="a-detail">' + esc(r.vioDetail) + '</span>' : '') +
+          '</div>';
+      }).join('') +
+      (vios.length > 8 ? '<div class="alarm-more">仅列出最近 8 条</div>' : '') +
+      '</div>';
   }
 
   function renderClassFilter() {
@@ -360,7 +409,12 @@
 
     var rows = list.map(function (r, i) {
       var dupTag = r.dup ? '<span class="badge dup">重考</span>' : '';
-      return '<tr class="' + (r.dup && !r.latest ? 'dup' : '') + '">' +
+      var trCls = r.violation ? 'vio' : (r.dup && !r.latest ? 'dup' : '');
+      var status = r.violation
+        ? '<span class="badge vio">违规 · ' + esc(vioText(r)) + '</span>' +
+          (r.vioDetail ? '<span class="vio-detail">' + esc(r.vioDetail) + '</span>' : '')
+        : (r.timedOut ? '<span class="badge dup">超时交卷</span>' : '<span class="badge pass">正常</span>');
+      return '<tr class="' + trCls + '">' +
         '<td class="rank">' + (i + 1) + '</td>' +
         '<td class="who">' + esc(r.name) + dupTag + '</td>' +
         '<td class="cls-cell">' + esc(r.cls) + '</td>' +
@@ -373,6 +427,7 @@
         '<td class="num">' + (r.right / TOTAL_Q * 100).toFixed(0) + '%</td>' +
         '<td class="num">' + (r.used == null ? '—' : fmtSec(r.used)) + '</td>' +
         '<td class="num">' + esc(r.time) + '</td>' +
+        '<td class="status-cell">' + status + '</td>' +
         '<td><button class="btn-mini" data-del="' + esc(r.id) + '" data-who="' +
         esc(r.name + ' ' + r.sid) + '">删除</button></td>' +
         '</tr>';
@@ -380,7 +435,7 @@
 
     $('board-table').innerHTML = '<table><thead><tr>' +
       '<th>#</th><th>姓名</th><th>班级</th><th>学号</th><th>得分</th>' +
-      '<th>答对</th><th>答错</th><th>未答</th><th>正确率</th><th>用时</th><th>交卷时间</th><th>操作</th>' +
+      '<th>答对</th><th>答错</th><th>未答</th><th>正确率</th><th>用时</th><th>交卷时间</th><th>状态</th><th>操作</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
 
     Array.prototype.forEach.call($('board-table').querySelectorAll('[data-del]'), function (b) {
@@ -413,11 +468,13 @@
   function exportCsv() {
     var list = S.view;
     if (!list.length) { toast('当前没有可导出的记录'); return; }
-    var head = ['序号', '姓名', '班级', '学号', '得分', '是否及格', '答对', '答错', '未作答', '正确率', '用时', '交卷时间'];
+    var head = ['序号', '姓名', '班级', '学号', '得分', '是否及格', '答对', '答错', '未作答', '正确率', '用时', '交卷时间', '状态', '违规详情'];
     var rows = list.map(function (r, i) {
       return [i + 1, r.name, r.cls, r.sid, fmtNum(r.score), r.pass ? '及格' : '不及格',
         r.right, r.wrong, r.blank, (r.right / TOTAL_Q * 100).toFixed(0) + '%',
-        r.used == null ? '' : fmtSec(r.used), r.time];
+        r.used == null ? '' : fmtSec(r.used), r.time,
+        r.violation ? ('违规：' + vioText(r)) : (r.timedOut ? '超时交卷' : '正常'),
+        r.violation ? (r.vioDetail || '') : ''];
     });
     var st = statsOf(list);
     var tail = [];
@@ -468,6 +525,9 @@
   $('f-class').addEventListener('change', function () { S.filterCls = this.value; render(); });
   $('f-sort').addEventListener('change', function () { S.sort = this.value; render(); });
   $('f-dedupe').addEventListener('change', function () { S.dedupe = this.checked; render(); });
+  if ($('f-violation')) {
+    $('f-violation').addEventListener('change', function () { S.onlyVio = this.checked; render(); });
+  }
 
   var textTimer = null;
   $('f-text').addEventListener('input', function () {

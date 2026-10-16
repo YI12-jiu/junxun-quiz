@@ -54,6 +54,8 @@
         <div class="ban-item"><b>④ 声音</b><span>环境声音超过 <b>50 dB</b>（相对声级）并持续约 <b>1.5 秒</b>即弹出<b>警告</b>，并记录上报教师端；<b>不会因此交卷</b>。需授权麦克风，未授权则不监测并如实标注</span></div>
         <div class="ban-item"><b>⑤ 截屏</b><span>电脑：按下截屏键（PrintScreen）会被记录并交卷</span></div>
       </div>
+      <p class="hint"><b>人脸采集</b>：点击「开始答题」后需现场拍摄一张本人照片（须露出正脸），
+        照片会随成绩一起提交给教师核验，用于防止他人顶替。请提前允许摄像头权限。</p>
       <p class="hint mob-hint">手机 / 平板同样受管控：切 App、分屏悬浮窗、长按复制粘贴都会被检测；
         系统截图无法被网页检测，以水印追溯代替。</p>
       <label class="agree">
@@ -170,6 +172,24 @@
     <div class="acts">
       <button class="btn btn-ghost" id="modal-cancel">取消</button>
       <button class="btn btn-primary" id="modal-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="face-mask" id="face-mask" hidden>
+  <div class="face-card">
+    <h3>考前人脸采集</h3>
+    <p class="face-tip" id="face-tip">请正对摄像头、取下口罩、保证光线充足；略微左右转头以完成活体检测。</p>
+    <div class="face-stage">
+      <video id="face-video" autoplay playsinline muted></video>
+      <div class="face-frame"></div>
+      <img id="face-preview" alt="已采集的人脸照片" hidden>
+    </div>
+    <div class="face-status" id="face-status">正在打开摄像头…</div>
+    <div class="face-acts">
+      <button class="btn btn-primary" id="face-shoot" disabled>拍摄并开始答题</button>
+      <button class="btn btn-ghost" id="face-retake" hidden>重新拍摄</button>
+      <button class="btn btn-ghost" id="face-cancel">取消</button>
     </div>
   </div>
 </div>

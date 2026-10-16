@@ -296,6 +296,7 @@
     finishedAt: '',
     violation: null,          // { code, detail, at }
     strikes: {},              // 「首次警告、再次交卷」的计数：{ leave: n, split: n }
+    face: null,               // 考前采集的人脸：{ photo: dataURL, live: bool }
     timedOut: false,          // 是否因超时自动交卷
     warned: 0,                // 已提示过的剩余时间档位
     focusFill: false,
@@ -520,6 +521,8 @@
       violated_at: S.violation ? S.violation.at.toISOString() : null,
       timed_out: !!S.timedOut,
       sound_monitored: !!GUARD.soundOk,
+      face_photo: (S.face && S.face.photo) ? S.face.photo : null,
+      face_live: S.face ? !!S.face.live : null,
     };
   }
 
@@ -834,6 +837,7 @@
 
   /* ---- 环境声音（麦克风 + Web Audio） ---- */
   function startSoundMonitor() {
+    stopSoundMonitor();          // 多次开考时必须先清掉上一次的定时器，否则计数会成倍累加、导致误判
     var md = navigator.mediaDevices;
     if (!md || !md.getUserMedia) { GUARD.soundOk = false; return Promise.resolve(false); }
     return Promise.resolve(md.getUserMedia({ audio: true })).then(function (stream) {
@@ -1076,7 +1080,152 @@
     beginExam2();
   }
 
+  /* ============================================================
+     考前人脸采集
+     · 只能用摄像头现场拍摄（不允许从相册选图）
+     · 活体检测：连续帧差异，拍摄前必须出现过明显画面变化，
+       用于拦掉「拿一张静止照片对着摄像头」这种最简单的替考
+     · **不做自动身份比对** —— 系统里没有学籍参考照，无法判断「是不是本人」；
+       照片随成绩提交，由教师在教师端人工核验
+     ============================================================ */
+  var FACE = {
+    stream: null, timer: null, prev: null, moved: false,
+    photo: '', stage: 'preview', resolve: null, canvas: null, startedAt: 0,
+  };
+  var FACE_MOTION_TH = 6;       // 单帧平均差异超过该值视为「有动作」
+  var FACE_MAX_WAIT = 20000;    // 超过这么久还没检测到动作就提示
+
+  function setFaceStatus(msg, cls) {
+    var el = $('face-status');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'face-status' + (cls ? ' ' + cls : '');
+  }
+
+  function stopFaceStream() {
+    if (FACE.timer) { clearInterval(FACE.timer); FACE.timer = null; }
+    if (FACE.stream) {
+      FACE.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
+      FACE.stream = null;
+    }
+    var v = $('face-video');
+    if (v) { try { v.srcObject = null; } catch (e) {} }
+  }
+
+  /* 打开摄像头 + 活体检测。与「外层 Promise」解耦，
+     这样「重新拍摄」可以复用它，而不会把外层的 resolve 覆盖掉。 */
+  function startFaceCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setFaceStatus('当前浏览器不支持摄像头，无法完成人脸采集。请改用 Chrome / Edge / Safari。', 'err');
+      return;
+    }
+    FACE.moved = false;
+    FACE.prev = null;
+    FACE.startedAt = Date.now();
+    setFaceStatus('正在打开摄像头…', '');
+
+    var v = $('face-video');
+    var c = FACE.canvas || (FACE.canvas = document.createElement('canvas'));
+    c.width = 64; c.height = 48;
+    var ctx = c.getContext('2d', { willReadFrequently: true });
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
+    }).then(function (stream) {
+      FACE.stream = stream;
+      v.srcObject = stream;
+      try { v.play(); } catch (e) {}
+      setFaceStatus('请正对摄像头（取下口罩），并略微左右转头…', '');
+      if (FACE.timer) clearInterval(FACE.timer);
+      FACE.timer = setInterval(function () {
+        if (!FACE.stream || v.readyState < 2) return;
+        ctx.drawImage(v, 0, 0, c.width, c.height);
+        var d;
+        try { d = ctx.getImageData(0, 0, c.width, c.height).data; } catch (e) { return; }
+        if (FACE.prev) {
+          var sum = 0;
+          for (var i = 0; i < d.length; i += 4) {
+            sum += Math.abs(d[i] - FACE.prev[i]) + Math.abs(d[i + 1] - FACE.prev[i + 1]);
+          }
+          if (sum / (d.length / 4) / 2 > FACE_MOTION_TH) FACE.moved = true;
+        }
+        FACE.prev = new Uint8ClampedArray(d);
+        if (FACE.moved) {
+          setFaceStatus('✔ 活体检测通过，可以拍摄了', 'ok');
+          if (FACE.stage === 'preview') $('face-shoot').disabled = false;
+        } else if (Date.now() - FACE.startedAt > FACE_MAX_WAIT) {
+          setFaceStatus('未检测到动作，请略微左右转头或靠近一点再试', 'err');
+        }
+      }, 200);
+    }).catch(function (err) {
+      var name = String((err && err.name) || '');
+      setFaceStatus(name === 'NotAllowedError'
+        ? '摄像头权限被拒绝。请在浏览器地址栏允许摄像头后刷新重试。'
+        : '无法打开摄像头（' + (name || '未知错误') + '）。', 'err');
+    });
+  }
+
+  function openFaceCapture() {
+    return new Promise(function (resolve) {
+      FACE.resolve = resolve;
+      FACE.photo = ''; FACE.moved = false; FACE.prev = null; FACE.stage = 'preview';
+      $('face-preview').hidden = true;
+      $('face-video').hidden = false;
+      $('face-shoot').hidden = false;
+      $('face-shoot').disabled = true;
+      $('face-shoot').textContent = '拍摄照片';
+      $('face-retake').hidden = true;
+      $('face-mask').hidden = false;
+      stopFaceStream();
+      startFaceCamera();
+    });
+  }
+
+  function shootFace() {
+    var v = $('face-video');
+    var c = document.createElement('canvas');
+    c.width = 320; c.height = 240;
+    var ctx = c.getContext('2d');
+    ctx.translate(c.width, 0); ctx.scale(-1, 1);   // 与预览一致，镜像回来
+    try { ctx.drawImage(v, 0, 0, c.width, c.height); } catch (e) {}
+    FACE.photo = c.toDataURL('image/jpeg', 0.62);
+    $('face-preview').src = FACE.photo;
+    $('face-preview').hidden = false;
+    v.hidden = true;
+    $('face-shoot').textContent = '开始答题';
+    $('face-retake').hidden = false;
+    setFaceStatus('已采集（活体检测' + (FACE.moved ? '通过' : '未通过') + '），确认清晰后点「开始答题」',
+      FACE.moved ? 'ok' : 'err');
+    FACE.stage = 'shot';
+    if (FACE.timer) { clearInterval(FACE.timer); FACE.timer = null; }
+  }
+
+  function closeFaceCapture(result) {
+    stopFaceStream();
+    $('face-mask').hidden = true;
+    var r = FACE.resolve;
+    FACE.resolve = null;
+    if (r) r(result);
+  }
+
   function beginExam2() {
+    var btn = $('btn-start');
+    btn.disabled = true;
+    btn.textContent = '正在准备考场…';
+    // 考前人脸采集（必填）
+    openFaceCapture().then(function (face) {
+      if (!face || !face.photo) {
+        btn.disabled = false;
+        btn.textContent = '开始答题';
+        toast('未完成人脸采集，无法开始答题');
+        return;
+      }
+      S.face = face;
+      runExamSetup();
+    });
+  }
+
+  function runExamSetup() {
     var btn = $('btn-start');
     btn.disabled = true;
     btn.textContent = '正在准备考场…';
@@ -1727,6 +1876,29 @@
 
   /* ---------- 按钮绑定 ---------- */
   $('btn-start').addEventListener('click', beginExam);
+  if ($('face-shoot')) {
+    $('face-shoot').addEventListener('click', function () {
+      if (FACE.stage === 'shot') { closeFaceCapture({ photo: FACE.photo, live: FACE.moved }); return; }
+      shootFace();
+    });
+  }
+  if ($('face-retake')) {
+    $('face-retake').addEventListener('click', function () {
+      FACE.stage = 'preview'; FACE.photo = ''; FACE.moved = false; FACE.prev = null;
+      $('face-preview').hidden = true;
+      $('face-video').hidden = false;
+      $('face-shoot').textContent = '拍摄照片';
+      $('face-shoot').disabled = true;
+      $('face-retake').hidden = true;
+      setFaceStatus('请重新正对摄像头，并略微左右转头…', '');
+      stopFaceStream();
+      startFaceCamera();
+    });
+  }
+  if ($('face-cancel')) {
+    $('face-cancel').addEventListener('click', function () { closeFaceCapture(null); });
+  }
+
   if ($('warning-ok')) {
     $('warning-ok').addEventListener('click', function () { $('warning-mask').hidden = true; });
   }

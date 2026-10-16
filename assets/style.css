@@ -399,6 +399,36 @@ kbd {
 .result-alert b { font-weight: 800; }
 
 /* ---------- 违规遮罩 ---------- */
+/* ---------- 考前人脸采集 ---------- */
+.face-mask {
+  position: fixed; inset: 0; z-index: 280; background: rgba(12, 18, 32, .72);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+.face-mask[hidden] { display: none; }
+.face-card {
+  background: #fff; border-radius: 18px; padding: 22px; width: min(460px, 100%);
+  box-shadow: 0 24px 60px rgba(10, 15, 30, .35); text-align: center;
+}
+.face-card h3 { margin: 0 0 8px; font-size: 18px; }
+.face-tip { margin: 0 0 14px; font-size: 13px; color: var(--ink-2); line-height: 1.7; }
+.face-stage {
+  position: relative; width: 100%; aspect-ratio: 4 / 3; background: #0d1220;
+  border-radius: 14px; overflow: hidden; margin-bottom: 12px;
+}
+.face-stage video, .face-stage img {
+  width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block;
+}
+.face-frame {
+  position: absolute; left: 50%; top: 50%; width: 52%; aspect-ratio: 3 / 4;
+  transform: translate(-50%, -50%); border: 2px dashed rgba(255, 255, 255, .55);
+  border-radius: 50% / 42%; pointer-events: none;
+}
+.face-status { font-size: 14px; font-weight: 700; color: var(--ink-2); margin-bottom: 14px; min-height: 20px; }
+.face-status.ok { color: var(--ok); }
+.face-status.err { color: var(--bad); }
+.face-acts { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.face-acts .btn { min-width: 130px; }
+
 /* ---------- 警告弹窗（首次违规只警告） ---------- */
 .warning-mask {
   position: fixed; inset: 0; z-index: 260; background: rgba(24, 18, 6, .55);

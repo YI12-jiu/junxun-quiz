@@ -8,6 +8,8 @@
 
   var CC = window.CLOUD_CONFIG || null;
   var LS_KEY = 'quiz.teacherkey';
+  var LS_WHO = 'quiz.teacherwho';
+  var LOGIN_RPC = (CC && CC.teacherLoginRpc) || 'teacher_login';
   var FULL_SCORE = 100, PASS_SCORE = 60, TOTAL_Q = 40, PER_SCORE = 2.5;
   var AUTO_MS = 15000;                 // 看板自动刷新间隔（有违规报警，刷新更勤）
 
@@ -110,6 +112,7 @@
   /* ---------- 状态 ---------- */
   var S = {
     key: '',
+    who: '',                         // 当前登录身份（如「教师一」）
     rows: [],
     viewAll: [],                     // 筛选后（未去重）
     view: [],                        // 筛选 + 去重，用于明细与导出
@@ -130,15 +133,35 @@
     window.scrollTo({ top: 0, behavior: 'auto' });
   }
 
-  /* ---------- 口令校验 ---------- */
+  /* ---------- 口令校验（支持多位教师各自的教师口令） ---------- */
+  /* 校验成功返回身份标识（如「教师一」），失败返回 null */
   function checkKey(key) {
     var cloud = getCloud();
     if (!cloud) return Promise.reject(new Error('cloud-sdk-unavailable'));
-    return Promise.resolve(cloud.database.rpc('teacher_key_ok', { p_key: key }))
+    return Promise.resolve(cloud.database.rpc(LOGIN_RPC, { p_key: key }))
       .then(function (res) {
         if (res && res.error) throw res.error;
-        return res && res.data === true;
+        var who = res && res.data;
+        return (typeof who === 'string' && who) ? who : null;
       });
+  }
+
+  function renderWho() {
+    var el = $('pill-who');
+    if (!el) return;
+    if (S.who) { el.hidden = false; el.textContent = '当前身份：' + S.who; }
+    else { el.hidden = true; el.textContent = ''; }
+  }
+
+  function backToGate(msg) {
+    lsDel(LS_KEY); lsDel(LS_WHO);
+    S.key = ''; S.who = ''; S.rows = []; S.view = []; S.viewAll = [];
+    stopAuto();
+    show('gate');
+    renderWho();
+    var el = $('gate-msg');
+    if (msg) { el.hidden = false; el.classList.remove('ok'); el.textContent = msg; }
+    else { el.hidden = true; }
   }
 
   function unlock(passedKey) {
@@ -154,18 +177,21 @@
     msg.hidden = false; msg.classList.remove('ok');
     msg.textContent = '正在校验口令…';
 
-    checkKey(key).then(function (ok) {
+    checkKey(key).then(function (who) {
       btn.disabled = false;
-      if (!ok) {
+      if (!who) {
         msg.classList.remove('ok');
-        msg.textContent = '口令不正确，请向任课教师确认后重试。';
+        msg.textContent = '口令不正确，请向管理员确认后重试。';
         $('in-key').select();
         return;
       }
       S.key = key;
+      S.who = who;
       lsSet(LS_KEY, key);
+      lsSet(LS_WHO, who);
       msg.hidden = true;
       $('in-key').value = '';
+      renderWho();
       show('board');
       startAuto();
       load();
@@ -186,7 +212,20 @@
     S.loading = true;
     if (!silent) $('pill-sync').textContent = '正在同步…';
 
-    Promise.resolve(cloud.database.rpc(CC.teacherListRpc, { p_key: S.key }))
+    // 每次都先确认口令仍然有效：口令可能已被轮换，而失效口令读取只会返回空表，
+    // 与「暂无成绩」同形，必须靠这一步区分。
+    Promise.resolve(cloud.database.rpc(LOGIN_RPC, { p_key: S.key }))
+      .then(function (whoRes) {
+        if (whoRes && whoRes.error) throw whoRes.error;
+        var who = whoRes && whoRes.data;
+        if (typeof who !== 'string' || !who) {
+          var e = new Error('teacher key invalid');
+          e.code = '42501';
+          throw e;
+        }
+        if (who !== S.who) { S.who = who; lsSet(LS_WHO, who); renderWho(); }
+        return cloud.database.rpc(CC.teacherListRpc, { p_key: S.key });
+      })
       .then(function (res) {
         if (res && res.error) throw res.error;
         var rows = Array.isArray(res && res.data) ? res.data : [];
@@ -198,13 +237,7 @@
       })
       .catch(function (err) {
         if (isDenied(err)) {
-          // 口令已在服务端失效或不被接受
-          lsDel(LS_KEY); S.key = '';
-          stopAuto();
-          show('gate');
-          $('gate-msg').hidden = false;
-          $('gate-msg').classList.remove('ok');
-          $('gate-msg').textContent = '口令已失效，请重新输入。';
+          backToGate('口令已失效（可能已被轮换），请重新输入。');
           return;
         }
         showError('成绩读取失败：' + ((err && err.message) || '网络异常，请稍后重试'));
@@ -516,9 +549,7 @@
   $('btn-csv').addEventListener('click', exportCsv);
   $('btn-print').addEventListener('click', function () { window.print(); });
   $('btn-lock').addEventListener('click', function () {
-    lsDel(LS_KEY); S.key = ''; stopAuto(); S.rows = [];
-    $('gate-msg').hidden = true;
-    show('gate');
+    backToGate(null);
     $('in-key').focus();
   });
 
@@ -546,6 +577,8 @@
     var saved = lsGet(LS_KEY, '');
     if (saved) {
       S.key = saved;
+      S.who = lsGet(LS_WHO, '') || '';
+      renderWho();
       show('board');
       startAuto();
       load();

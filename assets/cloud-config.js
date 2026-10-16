@@ -7,6 +7,7 @@ window.CLOUD_CONFIG = {
   oauthRelayBaseUrl: 'https://www.workbuddy.cn/v2/as/genie-baas/oauth',
   publishableKey: 'wbpk_ysv3RuaVcgwMU0jYndU3d9_QMwtuMukr06eaTQFCKR2aaSBwDAiK7AC',
   table: 'exam_records',
+  teacherLoginRpc: 'teacher_login',
   teacherListRpc: 'teacher_exam_records',
   teacherDeleteRpc: 'teacher_delete_record'
 };

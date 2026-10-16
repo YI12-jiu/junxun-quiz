@@ -22,7 +22,8 @@
 
     <div class="rules gate-card">
       <h2>请输入教师口令</h2>
-      <p class="hint">口令用于保护成绩数据，仅任课教师持有。验证通过后本机将记住口令，下次打开自动进入。</p>
+      <p class="hint">每位教师使用各自的口令登录，口令在服务端校验、不出现在前端代码里。
+        验证通过后本机将记住口令，下次打开自动进入；也可随时「锁定」切换他人。</p>
       <div class="gate-row">
         <input id="in-key" type="password" placeholder="教师口令" autocomplete="off" spellcheck="false">
         <button class="btn btn-primary" id="btn-unlock">进入看板</button>
@@ -41,6 +42,7 @@
     <div class="board-top">
       <div class="row">
         <span class="title">教师端 · 成绩汇总看板</span>
+        <span class="pill" id="pill-who" hidden></span>
         <span class="pill" id="pill-sync">尚未同步</span>
         <div class="spacer"></div>
         <button class="btn btn-ghost" id="btn-refresh">刷新数据</button>

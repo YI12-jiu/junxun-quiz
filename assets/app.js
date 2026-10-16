@@ -701,9 +701,13 @@
   var TYPING_GRACE = 2500;     // 刚碰过输入框后的宽限时间（输入法弹出会缩小视口，不能算分屏）
   var lastTypingAt = 0;
 
-  /* 触屏设备判定：手机 / 平板走另一套分屏规则（它们没有真正的全屏 API） */
-  function isTouch() {
-    return (navigator.maxTouchPoints || 0) > 0 || 'ontouchstart' in window;
+  /* 手机 / 平板判定：**按屏幕尺寸判断**，不用 UA 或触摸能力 ——
+     `'ontouchstart' in window` 在很多桌面浏览器（含触屏笔记本）上也为真，
+     用它判断会让桌面端的分屏检测直接失效。小屏设备本身也没有可用的全屏 API。 */
+  function isSmallScreen() {
+    var sw = (window.screen &&
+      Math.max(window.screen.availWidth || 0, window.screen.width || 0)) || 0;
+    return sw > 0 && sw < SPLIT_MIN_SCREEN;
   }
   function noteTyping() { lastTypingAt = Date.now(); }
   function inInput(el) {
@@ -718,6 +722,25 @@
   }
   function guardActive() {
     return GUARD.armed && !GUARD.fired && !S.graded && Date.now() >= GUARD.suppressUntil;
+  }
+
+  /* 声音超标：**只记录与提示，不立即交卷**。
+     仍会记入本次成绩、随交卷上报教师端并在名单中标红，只是不影响考生继续答题。 */
+  function flagSound(msg, db) {
+    var first = !S.violation;
+    if (first) {
+      S.violation = { code: 'sound', detail: msg, at: new Date(), peak: db };
+    } else if (S.violation.code === 'sound' && db > (S.violation.peak || -100)) {
+      S.violation.peak = db;
+      S.violation.detail = msg;                // 保留最响的一次描述
+    } else {
+      return;                                   // 已因其他原因被判违规，无需重复记录
+    }
+    if (first) {
+      toast('⚠ 检测到环境声音超标，已记录，交卷时会一并上报教师端');
+      renderGuardStatus();
+    }
+    renderSoundMeter();
   }
 
   function trip(code, detail) {
@@ -797,8 +820,9 @@
         if (db > SOUND_DB_LIMIT) GUARD.soundHits++;
         else if (GUARD.soundHits > 0) GUARD.soundHits--;
         if (GUARD.soundHits >= SOUND_HOLD) {
-          trip('sound', '环境声音 ' + db.toFixed(1) + ' dB，超过限值 ' + SOUND_DB_LIMIT +
-            ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒');
+          GUARD.soundHits = 0;                 // 复位，避免持续超标时每 0.5 秒重复触发
+          flagSound('环境声音 ' + db.toFixed(1) + ' dB，超过限值 ' + SOUND_DB_LIMIT +
+            ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒', db);
         }
       }, 100);
       return true;
@@ -810,10 +834,11 @@
     var el = $('sound-meter');
     if (!el) return;
     var db = GUARD.soundDb;
+    var flagged = !!(S.violation && S.violation.code === 'sound');
     var over = db > SOUND_DB_LIMIT;
-    el.className = 'gmeter' + (over ? ' over' : '');
+    el.className = 'gmeter' + (over ? ' over' : '') + (flagged ? ' flagged' : '');
     el.textContent = '环境声音 ' + (db <= SOUND_FLOOR ? '--' : db.toFixed(1)) +
-      ' dB　限值 ' + SOUND_DB_LIMIT + ' dB';
+      ' dB　限值 ' + SOUND_DB_LIMIT + ' dB' + (flagged ? '　已记录' : '');
   }
   function stopSoundMonitor() {
     clearInterval(GUARD.soundTimer);
@@ -909,6 +934,9 @@
   /* ---- 周期性巡检：分屏 / 全屏状态 ---- */
   function checkSplit() {
     if (!guardActive()) { GUARD.splitSince = 0; return; }
+    // 小屏设备交给下面的「可视高度」规则：手机上 outerWidth 的语义不可靠，
+    // 若照搬桌面规则可能整场考试都被误判为分屏。
+    if (isSmallScreen()) { GUARD.splitSince = 0; return; }
     var sw = (window.screen && window.screen.availWidth) || 0;
     var w = window.outerWidth || window.innerWidth || 0;
     if (sw < SPLIT_MIN_SCREEN || !w) { GUARD.splitSince = 0; return; }
@@ -927,7 +955,7 @@
      输入法弹出同样会压矮视口，因此刚碰过输入框的 2.5 秒内不判定。 */
   function checkMobileSplit() {
     if (!guardActive()) { GUARD.msplitSince = 0; return; }
-    if (!isTouch()) { GUARD.msplitSince = 0; return; }
+    if (!isSmallScreen()) { GUARD.msplitSince = 0; return; }
     var sh = (window.screen && window.screen.height) || 0;
     var ih = window.innerHeight || 0;
     if (!sh || !ih) { GUARD.msplitSince = 0; return; }
@@ -1097,9 +1125,9 @@
     var items = [
       ['退出/切屏拦截', true],
       ['截屏拦截', true],
-      [isTouch() ? '分屏/悬浮窗拦截' : '全屏与分屏拦截', isTouch() ? true : GUARD.fsOk],
+      [isSmallScreen() ? '分屏/悬浮窗拦截' : '全屏与分屏拦截', isSmallScreen() ? true : GUARD.fsOk],
       ['复制粘贴拦截', true],
-      ['环境声音监测', GUARD.soundOk],
+      ['环境声音监测（超标仅记录，不交卷）', GUARD.soundOk],
     ];
     items.push(['屏幕水印追溯', true]);
     el.innerHTML = items.map(function (it) {

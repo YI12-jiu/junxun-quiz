@@ -378,6 +378,7 @@ kbd {
   font-variant-numeric: tabular-nums;
 }
 .guard-bar .gmeter.over { background: var(--bad-soft); color: var(--bad); border-color: #f3c6c6; }
+.guard-bar .gmeter.flagged { background: var(--bad); color: #fff; border-color: var(--bad); font-weight: 800; }
 
 .time-banner {
   margin-top: 9px; padding: 8px 14px; border-radius: 10px; font-size: 14px; font-weight: 700;

@@ -21,6 +21,25 @@
 
     <div class="grid-cards" id="start-stats"></div>
 
+    <div class="rules" id="idcard">
+      <h2>考生信息（考核前必填）</h2>
+      <div class="idform">
+        <label class="field">
+          <span>姓　名</span>
+          <input id="in-name" type="text" maxlength="20" placeholder="请输入真实姓名" autocomplete="name">
+        </label>
+        <label class="field">
+          <span>班　级</span>
+          <input id="in-class" type="text" maxlength="30" placeholder="如：计算机 2301 班">
+        </label>
+        <label class="field">
+          <span>学　号</span>
+          <input id="in-id" type="text" maxlength="24" placeholder="请输入学号" autocomplete="off">
+        </label>
+      </div>
+      <p class="hint" id="id-hint">姓名、班级、学号会写入考核成绩单，请核对无误后开始答题。</p>
+    </div>
+
     <div class="rules">
       <h2>抽题规则</h2>
       <ul id="start-rules"></ul>
@@ -45,6 +64,8 @@
       <div class="spacer"></div>
       <button class="btn btn-primary" id="btn-start">开始答题</button>
     </div>
+
+    <div id="history-box" hidden></div>
   </div>
 </section>
 
@@ -54,6 +75,7 @@
     <div class="exam-top">
       <div class="row">
         <span class="title">综合考核</span>
+        <span class="pill" id="pill-who"></span>
         <span class="pill" id="pill-progress">已答 <b>0</b>/40</span>
         <span class="pill" id="pill-timer">用时 00:00</span>
         <div class="spacer"></div>
@@ -86,9 +108,16 @@
       <div>
         <h2 class="verdict" id="verdict"></h2>
         <p class="verdict-sub" id="verdict-sub"></p>
+        <div class="examinee-line" id="examinee-line"></div>
         <div class="score-grid" id="score-grid"></div>
       </div>
     </div>
+
+    <div class="sec-title">
+      <h2>分题库得分</h2>
+      <span class="hint">按来源题库拆分本次得分</span>
+    </div>
+    <div id="bank-table"></div>
 
     <div class="sec-title">
       <h2>错题回溯</h2>
@@ -102,9 +131,10 @@
     <div id="review-list"></div>
 
     <div class="footer-actions">
-      <button class="btn btn-primary" id="btn-again">重新抽题</button>
+      <button class="btn btn-primary" id="btn-doc">下载考核成绩单（Word）</button>
+      <button class="btn btn-ghost" id="btn-again">重新抽题</button>
+      <button class="btn btn-ghost" id="btn-print">打印 / 导出 PDF</button>
       <button class="btn btn-ghost" id="btn-home">返回首页</button>
-      <button class="btn btn-ghost" id="btn-print">打印 / 导出成绩单</button>
     </div>
   </div>
 </section>

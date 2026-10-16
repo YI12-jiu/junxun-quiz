@@ -266,6 +266,44 @@ kbd {
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
+/* ---------- 考生信息表单 ---------- */
+.idform { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin: 12px 0 4px; }
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field > span { font-size: 13px; font-weight: 700; color: var(--ink-2); letter-spacing: .5px; }
+.field input {
+  font-family: inherit; font-size: 15px; color: var(--ink);
+  border: 1.5px solid var(--line-2); border-radius: 11px; padding: 11px 13px;
+  background: #fbfcfe; transition: .14s ease; width: 100%;
+}
+.field input::placeholder { color: #a9b4c4; }
+.field input:focus { outline: none; border-color: var(--brand); background: #fff; box-shadow: 0 0 0 3px rgba(43, 74, 203, .12); }
+.field input.bad { border-color: var(--bad); background: var(--bad-soft); }
+#id-hint.err { color: var(--bad); font-weight: 700; }
+
+/* ---------- 成绩单 / 分题库表 ---------- */
+.examinee-line {
+  display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 0 0 14px;
+  font-size: 14px; color: var(--ink-2);
+}
+.examinee-line b { color: var(--ink); font-weight: 800; }
+
+.btable { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+.btable table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.btable th, .btable td { padding: 11px 15px; text-align: left; border-bottom: 1px solid var(--line); }
+.btable th { background: var(--bg-soft); font-size: 12.5px; color: var(--ink-3); letter-spacing: .5px; font-weight: 700; }
+.btable tr:last-child td { border-bottom: 0; }
+.btable td.num { font-variant-numeric: tabular-nums; font-weight: 700; }
+.btable tr.total td { background: var(--brand-soft); font-weight: 800; color: var(--brand); }
+
+.rowline { display: flex; align-items: center; gap: 10px; margin: 26px 0 12px; }
+.rowline h2 { font-size: 18px; margin: 0; }
+.rowline .spacer { flex: 1; }
+
+/* ---------- 历史记录 ---------- */
+#history-box { margin-top: 26px; }
+#history-box .btable { margin-top: 12px; }
+#history-box td.who { white-space: nowrap; }
+
 /* ---------- 打印 ---------- */
 @media print {
   body { background: #fff; }

@@ -48,6 +48,40 @@
     return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
   }
 
+  function fmtDate(d) {
+    d = d || new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+      p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+  }
+
+  function fmtStamp(d) {
+    d = d || new Date();
+    function p(n) { return (n < 10 ? '0' : '') + n; }
+    return '' + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
+  }
+
+  function lsGet(k, dft) {
+    try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : dft; } catch (e) { return dft; }
+  }
+  function lsSet(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
+  }
+
+  /* 触发浏览器下载 */
+  function download(filename, content, mime) {
+    var blob = new Blob(['\ufeff' + content], { type: mime + ';charset=utf-8' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
   var toastTimer = null;
   function toast(msg) {
     var el = $('toast');
@@ -135,8 +169,12 @@
   }
 
   /* ---------- 状态 ---------- */
+  var LS_ID = 'quiz.examinee';
+  var LS_REC = 'quiz.records';
+
   var S = {
     mode: 'random',
+    examinee: { name: '', cls: '', sid: '' },
     paper: [],
     idx: 0,
     answeredAt: {},
@@ -146,6 +184,7 @@
     graded: false,
     filter: 'wrong',
     result: null,
+    finishedAt: '',
   };
 
   /* ---------- 首页 ---------- */
@@ -180,6 +219,112 @@
       b.classList.add('on');
       S.mode = b.dataset.mode;
     });
+
+    // 恢复上次填写的考生信息
+    var saved = lsGet(LS_ID, null);
+    if (saved) {
+      if (saved.name) $('in-name').value = saved.name;
+      if (saved.cls) $('in-class').value = saved.cls;
+      if (saved.sid) $('in-id').value = saved.sid;
+    }
+    ['in-name', 'in-class', 'in-id'].forEach(function (id) {
+      $(id).addEventListener('input', function () {
+        this.classList.remove('bad');
+        $('id-hint').classList.remove('err');
+        $('id-hint').textContent = '姓名、班级、学号会写入考核成绩单，请核对无误后开始答题。';
+      });
+    });
+    renderHistory();
+  }
+
+  /* ---------- 考生信息 ---------- */
+  var ID_HINT = '姓名、班级、学号会写入考核成绩单，请核对无误后开始答题。';
+
+  function readIdentity() {
+    var v = {
+      name: $('in-name').value.trim(),
+      cls: $('in-class').value.trim(),
+      sid: $('in-id').value.trim(),
+    };
+    var bad = [];
+    if (!v.name) bad.push('姓名');
+    else if (v.name.length < 2) bad.push('姓名（至少 2 个字）');
+    if (!v.cls) bad.push('班级');
+    if (!v.sid) bad.push('学号');
+    else if (!/^[0-9A-Za-z\-]{4,24}$/.test(v.sid)) bad.push('学号（4~24 位数字或字母）');
+
+    $('in-name').classList.toggle('bad', !v.name || v.name.length < 2);
+    $('in-class').classList.toggle('bad', !v.cls);
+    $('in-id').classList.toggle('bad', !v.sid || !/^[0-9A-Za-z\-]{4,24}$/.test(v.sid));
+
+    if (bad.length) {
+      $('id-hint').classList.add('err');
+      $('id-hint').textContent = '请填写正确的：' + bad.join('、');
+      var first = $('in-name').classList.contains('bad') ? $('in-name')
+        : ($('in-class').classList.contains('bad') ? $('in-class') : $('in-id'));
+      first.focus();
+      toast('请先完善考生信息');
+      return null;
+    }
+    $('id-hint').classList.remove('err');
+    $('id-hint').textContent = ID_HINT;
+    return v;
+  }
+
+  /* ---------- 历史考核记录 ---------- */
+  function saveRecord(rec) {
+    var list = lsGet(LS_REC, []);
+    list.unshift(rec);
+    if (list.length > 200) list = list.slice(0, 200);
+    lsSet(LS_REC, list);
+  }
+
+  function renderHistory() {
+    var list = lsGet(LS_REC, []);
+    var box = $('history-box');
+    if (!list.length) { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    box.innerHTML =
+      '<div class="rowline"><h2>历史考核记录</h2>' +
+      '<span class="hint">本机共 ' + list.length + ' 条（保存在浏览器本地）</span>' +
+      '<div class="spacer"></div>' +
+      '<button class="btn btn-ghost" id="btn-csv">导出汇总表（CSV）</button>' +
+      '<button class="btn btn-ghost" id="btn-clear">清空记录</button></div>' +
+      '<div class="btable"><table><thead><tr>' +
+      '<th>考试时间</th><th>姓名</th><th>班级</th><th>学号</th>' +
+      '<th>得分</th><th>答对</th><th>答错</th><th>未答</th><th>用时</th>' +
+      '</tr></thead><tbody>' +
+      list.map(function (r) {
+        return '<tr><td class="num">' + esc(r.time) + '</td><td>' + esc(r.name) +
+          '</td><td>' + esc(r.cls) + '</td><td class="who num">' + esc(r.sid) +
+          '</td><td class="num">' + r.score + '</td><td class="num">' + r.right +
+          '</td><td class="num">' + r.wrong + '</td><td class="num">' + r.blank +
+          '</td><td class="num">' + esc(r.used) + '</td></tr>';
+      }).join('') +
+      '</tbody></table></div>';
+
+    $('btn-csv').addEventListener('click', exportCsv);
+    $('btn-clear').addEventListener('click', function () {
+      confirmBox('清空记录', '将删除本机保存的全部考核记录，确定吗？', '清空', '取消')
+        .then(function (ok) { if (ok) { lsSet(LS_REC, []); renderHistory(); toast('已清空'); } });
+    });
+  }
+
+  function exportCsv() {
+    var list = lsGet(LS_REC, []);
+    if (!list.length) { toast('暂无记录'); return; }
+    var head = ['考试时间', '姓名', '班级', '学号', '得分', '答对', '答错', '未作答', '用时', '正确率'];
+    var rows = list.map(function (r) {
+      return [r.time, r.name, r.cls, r.sid, r.score, r.right, r.wrong, r.blank, r.used, r.rate];
+    });
+    var csv = [head].concat(rows).map(function (row) {
+      return row.map(function (c) {
+        c = String(c == null ? '' : c);
+        return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c;
+      }).join(',');
+    }).join('\r\n');
+    download('考核成绩汇总表_' + fmtStamp() + '.csv', csv, 'text/csv');
+    toast('汇总表已导出');
   }
 
   /* ---------- 屏幕切换 ---------- */
@@ -191,6 +336,14 @@
   }
 
   /* ---------- 开始考试 ---------- */
+  function beginExam() {
+    var id = readIdentity();
+    if (!id) return;                 // 信息不完整，阻止进入考试
+    S.examinee = id;
+    lsSet(LS_ID, id);
+    startExam();
+  }
+
   function startExam() {
     S.paper = newPaper(S.mode);
     S.idx = 0;
@@ -203,6 +356,7 @@
     });
     $('btn-submit').disabled = false;
     $('btn-submit-top').disabled = false;
+    $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
     startTimer();
     show('exam');
     renderExam();
@@ -315,18 +469,35 @@
   function grade() {
     stopTimer();
     S.elapsed = Math.floor((Date.now() - S.startAt) / 1000);
+    S.finishedAt = fmtDate();
     S.graded = true;
 
     var right = 0, wrong = 0, blank = 0, items = [];
+    var byBank = {};
     S.paper.forEach(function (it, i) {
       var ok = it.picked.length > 0 && sameSet(it.picked, it.answer);
       var blankQ = it.picked.length === 0;
       if (ok) right++; else { wrong++; if (blankQ) blank++; }
       items.push({ no: i + 1, item: it, ok: ok, blank: blankQ });
+
+      var b = byBank[it.bank] || (byBank[it.bank] = { total: 0, right: 0, wrong: 0 });
+      b.total++;
+      if (ok) b.right++; else b.wrong++;
     });
 
     var score = right * PER_SCORE;
-    S.result = { score: score, right: right, wrong: wrong, blank: blank, items: items };
+    S.result = {
+      score: score, right: right, wrong: wrong, blank: blank,
+      items: items, byBank: byBank,
+    };
+
+    saveRecord({
+      time: S.finishedAt,
+      name: S.examinee.name, cls: S.examinee.cls, sid: S.examinee.sid,
+      score: Math.round(score * 100) / 100, right: right, wrong: wrong, blank: blank,
+      used: fmtTime(S.elapsed), rate: Math.round(right / TOTAL_Q * 100) + '%',
+    });
+
     renderResult();
     show('result');
   }
@@ -357,8 +528,14 @@
     else if (score >= PASS_SCORE) { verdict = '及格'; sub = '已通过，建议逐题研读错题回溯。'; }
     else                   { verdict = '未及格'; sub = '别急，先按错题回溯逐题复盘，再重新抽一套练手。'; }
     $('verdict').textContent = verdict + '　·　得分 ' + (score % 1 === 0 ? score : score.toFixed(1)) + ' 分';
-    $('verdict-sub').innerHTML = sub + '　用时 <b>' + fmtTime(S.elapsed) + '</b>　·　交卷时间 ' +
-      new Date().toLocaleString('zh-CN');
+    $('verdict-sub').textContent = sub;
+
+    $('examinee-line').innerHTML =
+      '<span>姓名：<b>' + esc(S.examinee.name) + '</b></span>' +
+      '<span>班级：<b>' + esc(S.examinee.cls) + '</b></span>' +
+      '<span>学号：<b>' + esc(S.examinee.sid) + '</b></span>' +
+      '<span>用时：<b>' + fmtTime(S.elapsed) + '</b></span>' +
+      '<span>交卷时间：<b>' + esc(S.finishedAt) + '</b></span>';
 
     $('score-grid').innerHTML =
       '<div class="s ok"><b>' + R.right + '</b><span>答对</span></div>' +
@@ -366,8 +543,36 @@
       '<div class="s"><b>' + R.blank + '</b><span>未作答</span></div>' +
       '<div class="s"><b>' + (R.right / TOTAL_Q * 100).toFixed(0) + '%</b><span>正确率</span></div>';
 
+    renderBankTable();
+
     $('review-count').textContent = '共答错 ' + R.wrong + ' 题' + (R.blank ? '（其中未作答 ' + R.blank + ' 题）' : '');
     renderReview();
+  }
+
+  /* 分题库得分表 */
+  function renderBankTable() {
+    var byBank = S.result.byBank;
+    var order = RULES.map(function (r) { return r.bank; });
+    var rows = '', tRight = 0, tWrong = 0, tScore = 0;
+    order.forEach(function (key) {
+      var b = byBank[key];
+      if (!b) return;
+      var meta = BANK_META[key] || { name: key };
+      var s = b.right * PER_SCORE;
+      tRight += b.right; tWrong += b.wrong; tScore += s;
+      rows += '<tr><td>' + esc(meta.name) + '</td>' +
+        '<td class="num">' + b.total + '</td>' +
+        '<td class="num">' + b.right + '</td>' +
+        '<td class="num">' + b.wrong + '</td>' +
+        '<td class="num">' + (s % 1 === 0 ? s : s.toFixed(1)) + '</td></tr>';
+    });
+    rows += '<tr class="total"><td>合计</td><td class="num">' + (tRight + tWrong) +
+      '</td><td class="num">' + tRight + '</td><td class="num">' + tWrong +
+      '</td><td class="num">' + (tScore % 1 === 0 ? tScore : tScore.toFixed(1)) + '</td></tr>';
+
+    $('bank-table').innerHTML = '<div class="btable"><table><thead><tr>' +
+      '<th>来源题库</th><th>抽题数</th><th>答对</th><th>答错</th><th>得分</th>' +
+      '</tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
 
   function renderReview() {
@@ -416,6 +621,108 @@
     }).join('');
   }
 
+  /* ---------- 成绩单文档（Word .doc，A4 排版） ---------- */
+  var DOC_CSS = [
+    '@page { size: A4; margin: 1.8cm 1.6cm; }',
+    'body { font-family: "宋体", SimSun, serif; font-size: 10.5pt; color: #000; line-height: 1.65; }',
+    'h1 { font-family: "黑体", SimHei, sans-serif; font-size: 18pt; text-align: center; margin: 0 0 4pt; }',
+    '.sub { text-align: center; font-size: 9.5pt; color: #444; margin: 0 0 14pt; }',
+    'h2 { font-family: "黑体", SimHei, sans-serif; font-size: 12pt; margin: 15pt 0 5pt; }',
+    'table { border-collapse: collapse; width: 100%; margin: 4pt 0; }',
+    'td, th { border: 0.75pt solid #888; padding: 5pt 7pt; font-size: 10pt; vertical-align: top; }',
+    'th { background: #eef2ff; font-weight: bold; text-align: left; }',
+    'td.k { background: #f5f7fb; font-weight: bold; width: 15%; }',
+    'td.v { width: 35%; }',
+    '.q { margin: 0 0 9pt; padding-bottom: 7pt; border-bottom: 0.5pt dashed #bbb; }',
+    '.qt { font-weight: bold; margin: 0 0 3pt; }',
+    '.qs { margin: 0 0 4pt; }',
+    '.qo { margin: 1pt 0 1pt 16pt; }',
+    '.qo.ok { color: #0b7a4b; font-weight: bold; }',
+    '.qo.no { color: #c0392b; font-weight: bold; }',
+    '.qa { margin: 5pt 0 0; font-weight: bold; }',
+    '.note { color: #444; font-size: 9.5pt; margin: 0 0 8pt; }',
+    '.sign { margin-top: 20pt; }'
+  ].join('\n');
+
+  function buildDocHtml() {
+    var R = S.result, e = S.examinee;
+    var score = R.score % 1 === 0 ? R.score : R.score.toFixed(1);
+    var h = [];
+
+    h.push('<h1>综合考核成绩单</h1>');
+    h.push('<p class="sub">军事技能训练理论 · 学生手册 · 安全知识　　全卷 40 题，每题 2.5 分，满分 100 分</p>');
+
+    h.push('<table>');
+    h.push('<tr><td class="k">姓　　名</td><td class="v">' + esc(e.name) +
+      '</td><td class="k">班　　级</td><td class="v">' + esc(e.cls) + '</td></tr>');
+    h.push('<tr><td class="k">学　　号</td><td class="v">' + esc(e.sid) +
+      '</td><td class="k">考试用时</td><td class="v">' + fmtTime(S.elapsed) + '</td></tr>');
+    h.push('<tr><td class="k">交卷时间</td><td class="v" colspan="3">' + esc(S.finishedAt) + '</td></tr>');
+    h.push('</table>');
+
+    h.push('<h2>一、成绩汇总</h2>');
+    h.push('<table><tr><th>最终得分</th><th>试卷满分</th><th>答对</th><th>答错</th><th>未作答</th><th>正确率</th></tr>');
+    h.push('<tr><td>' + score + '</td><td>100</td><td>' + R.right + '</td><td>' + R.wrong +
+      '</td><td>' + R.blank + '</td><td>' + (R.right / TOTAL_Q * 100).toFixed(0) + '%</td></tr></table>');
+
+    h.push('<h2>二、分题库得分</h2>');
+    h.push('<table><tr><th>来源题库</th><th>抽题数</th><th>答对</th><th>答错</th><th>得分</th></tr>');
+    var tR = 0, tW = 0, tS = 0;
+    RULES.forEach(function (rule) {
+      var b = R.byBank[rule.bank];
+      if (!b) return;
+      var meta = BANK_META[rule.bank] || { name: rule.bank };
+      var s = b.right * PER_SCORE;
+      tR += b.right; tW += b.wrong; tS += s;
+      h.push('<tr><td>' + esc(meta.name) + '</td><td>' + b.total + '</td><td>' + b.right +
+        '</td><td>' + b.wrong + '</td><td>' + (s % 1 === 0 ? s : s.toFixed(1)) + '</td></tr>');
+    });
+    h.push('<tr><td><b>合计</b></td><td><b>' + (tR + tW) + '</b></td><td><b>' + tR +
+      '</b></td><td><b>' + tW + '</b></td><td><b>' + (tS % 1 === 0 ? tS : tS.toFixed(1)) + '</b></td></tr>');
+    h.push('</table>');
+
+    h.push('<h2>三、答题明细</h2>');
+    h.push('<p class="note">全卷共 ' + TOTAL_Q + ' 题。绿色加粗为正确答案，红色加粗为误选项，' +
+      '「你的答案」与「标准答案」不一致的题目即为错题。</p>');
+
+    R.items.forEach(function (rec) {
+      var it = rec.item;
+      var meta = BANK_META[it.bank] || { name: it.bank };
+      var opts = it.options.map(function (o) {
+        var isAns = it.answer.indexOf(o[0]) > -1;
+        var isPick = it.picked.indexOf(o[0]) > -1;
+        var cls = isAns ? 'qo ok' : (isPick ? 'qo no' : 'qo');
+        var mark = isAns ? '　【正确答案】' : (isPick ? '　【误选】' : '');
+        return '<p class="' + cls + '">' + esc(o[0]) + '．' + esc(o[1]) + mark + '</p>';
+      }).join('');
+      var verdict = rec.ok ? '【答对】' : (rec.blank ? '【未作答】' : '【答错】');
+      h.push('<div class="q">' +
+        '<p class="qt">第 ' + rec.no + ' 题　' + (it.type === 'M' ? '［多选］' : '［单选］') +
+        ' ' + esc(meta.name) + '　' + verdict + '</p>' +
+        '<p class="qs">' + esc(it.stem) + '</p>' + opts +
+        '<p class="qa">你的答案：' + esc(it.picked.length ? letters(it.picked) : '未作答') +
+        '　　标准答案：' + esc(letters(it.answer)) + '</p>' +
+        '</div>');
+    });
+
+    h.push('<p class="sign">考生签名：________________　　　　　日期：________________</p>');
+
+    return '<html xmlns:o="urn:schemas-microsoft-com:office:office" ' +
+      'xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+      '<head><meta charset="utf-8"><title>综合考核成绩单</title>' +
+      '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom>' +
+      '</w:WordDocument></xml><![endif]-->' +
+      '<style>' + DOC_CSS + '</style></head><body>' + h.join('\n') + '</body></html>';
+  }
+
+  function downloadDoc() {
+    if (!S.graded || !S.result) { toast('请先完成考核'); return; }
+    var e = S.examinee;
+    var name = '考核成绩单_' + e.name + '_' + e.sid + '_' + fmtStamp() + '.doc';
+    download(name, buildDocHtml(), 'application/msword');
+    toast('成绩单已下载：' + name);
+  }
+
   /* ---------- 键盘 ---------- */
   document.addEventListener('keydown', function (e) {
     if ($('modal-mask').classList.contains('open')) {
@@ -437,20 +744,21 @@
   });
 
   /* ---------- 按钮绑定 ---------- */
-  $('btn-start').addEventListener('click', startExam);
+  $('btn-start').addEventListener('click', beginExam);
   $('btn-submit').addEventListener('click', submit);
   $('btn-submit-top').addEventListener('click', submit);
+  $('btn-doc').addEventListener('click', downloadDoc);
 
   $('btn-abort').addEventListener('click', function () {
     confirmBox('退出考试', '退出后当前试卷的作答将会丢失，确定退出吗？', '退出', '继续答题')
-      .then(function (ok) { if (ok) { stopTimer(); show('start'); } });
+      .then(function (ok) { if (ok) { stopTimer(); show('start'); renderHistory(); } });
   });
 
   $('btn-again').addEventListener('click', function () {
-    startExam();
+    beginExam();
     toast('已重新随机生成一套新试卷');
   });
-  $('btn-home').addEventListener('click', function () { show('start'); });
+  $('btn-home').addEventListener('click', function () { renderHistory(); show('start'); });
   $('btn-print').addEventListener('click', function () { window.print(); });
 
   $('filter-seg').addEventListener('click', function (e) {

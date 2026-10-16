@@ -9,5 +9,7 @@ window.CLOUD_CONFIG = {
   table: 'exam_records',
   teacherLoginRpc: 'teacher_login',
   teacherListRpc: 'teacher_exam_records',
-  teacherDeleteRpc: 'teacher_delete_record'
+  teacherDeleteRpc: 'teacher_delete_record',
+  teacherDeleteManyRpc: 'teacher_delete_records',
+  teacherClearRpc: 'teacher_clear_records'
 };

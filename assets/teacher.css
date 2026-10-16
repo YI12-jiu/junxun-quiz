@@ -118,6 +118,32 @@
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ---------- 批量操作条 ---------- */
+.selbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 11px 16px; margin: 12px 0 0;
+}
+.selbar .spacer { flex: 1; }
+.selbar .sel-all { padding-bottom: 0; }
+.selbar .sel-info { font-size: 14px; color: var(--ink-2); font-weight: 600; }
+.selbar .sel-info b { color: var(--brand); }
+.btn-mini.danger { border-color: var(--bad); color: #fff; background: var(--bad); font-weight: 700; }
+.btn-mini.danger:hover { background: #b62f2f; border-color: #b62f2f; color: #fff; }
+.btn-mini.danger:disabled { opacity: .45; cursor: not-allowed; background: var(--bad); border-color: var(--bad); }
+.btn-mini.danger-ghost { border-color: var(--bad); color: var(--bad); font-weight: 700; }
+.btn-mini.danger-ghost:hover { background: var(--bad); color: #fff; }
+.btable th.ck, .btable td.ck { width: 34px; text-align: center; padding-left: 10px; padding-right: 0; }
+.btable td.ck input, .selbar input { accent-color: var(--brand); cursor: pointer; }
+td.ck input { width: 16px; height: 16px; }
+
+/* 危险操作确认框里的输入 */
+#modal-input {
+  width: 100%; margin: 0 0 16px; padding: 10px 13px; font-size: 15px; font-family: inherit;
+  border: 1px solid var(--line-2); border-radius: 10px; background: #fbfcfe;
+}
+#modal-input:focus { outline: none; border-color: var(--bad); box-shadow: 0 0 0 3px rgba(211,58,58,.12); }
+
 /* ---------- 违规报警区 ---------- */
 #alarm-box {
   border: 1px solid #f0b8b8; background: #fff6f6; border-radius: var(--radius);

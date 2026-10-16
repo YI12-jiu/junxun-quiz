@@ -57,6 +57,8 @@
       p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
   }
 
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
   var toastTimer = null;
   function toast(msg) {
     var el = $('toast');
@@ -67,16 +69,34 @@
   }
 
   var modalResolve = null;
-  function confirmBox(title, text, okText, cancelText) {
+  /* requirePhrase：给了就必须一字不差地输入该文字，「确定」才会解锁 —— 用于清空全部这种不可逆操作 */
+  function confirmBox(title, text, okText, cancelText, requirePhrase) {
     $('modal-title').textContent = title;
     $('modal-text').innerHTML = text;
     $('modal-ok').textContent = okText || '确定';
     $('modal-cancel').textContent = cancelText || '取消';
+    var inp = $('modal-input');
+    if (requirePhrase) {
+      inp.hidden = false;
+      inp.value = '';
+      inp.placeholder = '请输入「' + requirePhrase + '」以确认';
+      $('modal-ok').disabled = true;
+      inp.oninput = function () { $('modal-ok').disabled = this.value.trim() !== requirePhrase; };
+      setTimeout(function () { try { inp.focus(); } catch (e) {} }, 50);
+    } else {
+      inp.hidden = true;
+      inp.value = '';
+      inp.oninput = null;
+      $('modal-ok').disabled = false;
+    }
     $('modal-mask').classList.add('open');
     return new Promise(function (res) { modalResolve = res; });
   }
   function closeModal(v) {
     $('modal-mask').classList.remove('open');
+    $('modal-ok').disabled = false;
+    var inp = $('modal-input');
+    if (inp) { inp.hidden = true; inp.value = ''; inp.oninput = null; }
     if (modalResolve) { modalResolve(v); modalResolve = null; }
   }
   $('modal-ok').addEventListener('click', function () { closeModal(true); });
@@ -119,6 +139,7 @@
     filterCls: '',
     filterText: '',
     onlyVio: false,                  // 仅看违规
+    selected: new Set(),             // 已勾选的记录 id（批量删除用）
     sort: 'time-desc',
     dedupe: true,
     lastSync: '',
@@ -379,9 +400,15 @@
         '<div class="v">' + esc(c.v) + ' <em>' + esc(c.s) + '</em></div></div>';
     }).join('');
 
+    // 已经被删掉的记录留在选择集里没有意义，顺手清掉
+    var alive = {};
+    S.rows.forEach(function (r) { alive[r.id] = 1; });
+    S.selected.forEach(function (id) { if (!alive[id]) S.selected.delete(id); });
+
     renderClassFilter();
     renderAlarm();
     renderTable(list, st);
+    renderSelbar();
   }
 
   /* ---------- 违规报警区 ---------- */
@@ -448,6 +475,8 @@
           (r.vioDetail ? '<span class="vio-detail">' + esc(r.vioDetail) + '</span>' : '')
         : (r.timedOut ? '<span class="badge dup">超时交卷</span>' : '<span class="badge pass">正常</span>');
       return '<tr class="' + trCls + '">' +
+        '<td class="ck"><input type="checkbox" class="rowck" data-id="' + esc(r.id) + '"' +
+        (S.selected.has(r.id) ? ' checked' : '') + '></td>' +
         '<td class="rank">' + (i + 1) + '</td>' +
         '<td class="who">' + esc(r.name) + dupTag + '</td>' +
         '<td class="cls-cell">' + esc(r.cls) + '</td>' +
@@ -467,13 +496,22 @@
     }).join('');
 
     $('board-table').innerHTML = '<table><thead><tr>' +
-      '<th>#</th><th>姓名</th><th>班级</th><th>学号</th><th>得分</th>' +
+      '<th class="ck"></th><th>#</th><th>姓名</th><th>班级</th><th>学号</th><th>得分</th>' +
       '<th>答对</th><th>答错</th><th>未答</th><th>正确率</th><th>用时</th><th>交卷时间</th><th>状态</th><th>操作</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
 
     Array.prototype.forEach.call($('board-table').querySelectorAll('[data-del]'), function (b) {
       b.addEventListener('click', function () { askDelete(b.dataset.del, b.dataset.who); });
     });
+    // 逐行勾选：只更新选择集与顶部状态，不整表重绘
+    Array.prototype.forEach.call($('board-table').querySelectorAll('.rowck'), function (ck) {
+      ck.addEventListener('change', function () {
+        if (this.checked) S.selected.add(this.dataset.id);
+        else S.selected.delete(this.dataset.id);
+        renderSelbar();
+      });
+    });
+    renderSelbar();
   }
 
   /* ---------- 删除记录 ---------- */
@@ -495,6 +533,131 @@
             toast(isDenied(err) ? '口令已失效，请重新登录' : '删除失败：' + ((err && err.message) || '网络异常'));
           });
       });
+  }
+
+  /* ---------- 批量删除 / 清空全部 ---------- */
+  /* 当前筛选结果（表格里看到的那批）的 id */
+  function viewIds() {
+    return (S.view || []).map(function (r) { return r.id; });
+  }
+
+  function renderSelbar() {
+    var el = $('sel-count');
+    if (el) {
+      var n = S.selected.size;
+      el.innerHTML = n ? ('已选 <b>' + n + '</b> 条') : '未选择任何记录';
+    }
+    var b = $('btn-del-sel');
+    if (b) {
+      b.disabled = S.selected.size === 0 || S.loading;
+      if (!/.+…$/.test(b.textContent)) b.textContent = '批量删除所选';
+    }
+    var none = $('btn-sel-none');
+    if (none) none.disabled = S.selected.size === 0;
+    var all = $('ck-all');
+    if (all) {
+      var ids = viewIds();
+      var sel = ids.filter(function (id) { return S.selected.has(id); }).length;
+      all.checked = ids.length > 0 && sel === ids.length;
+      all.indeterminate = sel > 0 && sel < ids.length;
+      all.disabled = ids.length === 0;
+    }
+    var delAll = $('btn-del-all');
+    if (delAll) delAll.disabled = S.rows.length === 0 || S.loading;
+  }
+
+  /* 分批调用服务端批量删除；失败按 0.5s→1s→2s 退避重试 */
+  function deleteChunk(chunk, maxTries) {
+    var cloud = getCloud();
+    if (!cloud) return Promise.reject(new Error('cloud-sdk-unavailable'));
+    maxTries = maxTries || 3;
+    var attempt = 0;
+    function once() {
+      attempt++;
+      return Promise.resolve(cloud.database.rpc(CC.teacherDeleteManyRpc, { p_key: S.key, p_ids: chunk }))
+        .then(function (res) {
+          if (res && res.error) throw res.error;
+          var n = Array.isArray(res.data) ? res.data[0] : res.data;
+          return Number(n) || 0;
+        })
+        .catch(function (err) {
+          if (attempt >= maxTries || isDenied(err)) throw err;
+          return sleep(500 * attempt).then(once);
+        });
+    }
+    return once();
+  }
+
+  var CHUNK = 200;
+
+  function runBatchDelete(ids, label) {
+    var btn = $('btn-del-sel');
+    var total = ids.length;
+    var chunks = [];
+    for (var i = 0; i < ids.length; i += CHUNK) chunks.push(ids.slice(i, i + CHUNK));
+    var done = 0, failed = 0;
+
+    S.loading = true;
+    var chain = Promise.resolve();
+    chunks.forEach(function (ch) {
+      chain = chain.then(function () {
+        if (btn) btn.textContent = '删除中 ' + done + '/' + total + ' …';
+        return deleteChunk(ch).then(function (k) { done += k; })
+          .catch(function () { failed += ch.length; });
+      });
+    });
+    chain.then(function () {
+      S.loading = false;
+      ids.forEach(function (id) { S.selected.delete(id); });
+      if (failed) toast('已删除 ' + done + ' 条，' + failed + ' 条失败，请稍后重试');
+      else toast(label + '完成：共删除 ' + done + ' 条');
+      load(true);
+    });
+  }
+
+  function deleteSelected() {
+    var ids = [...S.selected];
+    if (!ids.length) { toast('请先勾选要删除的记录'); return; }
+    var n = ids.length;
+    var extra = n >= 100 ? '<br><b>数量较多（' + n + ' 条），建议先确认这确实是你要删除的范围。</b>' : '';
+    confirmBox('批量删除',
+      '将删除 <b>' + n + '</b> 条成绩记录，<b>删除后无法恢复</b>。' + extra + '<br>确定继续吗？',
+      '删除 ' + n + ' 条', '取消').then(function (ok) {
+      if (ok) runBatchDelete(ids, '批量删除');
+    });
+  }
+
+  function clearAll() {
+    var n = S.rows.length;
+    if (!n) { toast('当前没有成绩可清空'); return; }
+    var vio = S.rows.filter(function (r) { return !!r.violation; }).length;
+    confirmBox('清空全部成绩',
+      '将删除表内<b>全部 ' + n + ' 条</b>成绩记录（含违规记录 ' + vio + ' 条）。' +
+      '<br><b>此操作不可恢复</b>，请先确认已导出需要的成绩册。<br>' +
+      '<span class="hint">为防止误操作，请在下方输入「清空全部」后再点确认。</span>',
+      '确认清空', '取消', '清空全部').then(function (ok) {
+      if (!ok) return;
+      var cloud = getCloud();
+      if (!cloud) { toast('云服务组件未加载'); return; }
+      var btn = $('btn-del-all');
+      if (btn) btn.textContent = '清空中…';
+      S.loading = true;
+      Promise.resolve(cloud.database.rpc(CC.teacherClearRpc, { p_key: S.key }))
+        .then(function (res) {
+          if (res && res.error) throw res.error;
+          var k = Array.isArray(res.data) ? res.data[0] : res.data;
+          S.selected.clear();
+          toast('已清空全部成绩：共删除 ' + (Number(k) || 0) + ' 条');
+        })
+        .catch(function (err) {
+          toast(isDenied(err) ? '口令已失效，请重新登录' : ('清空失败：' + ((err && err.message) || '网络异常')));
+        })
+        .then(function () {
+          S.loading = false;
+          if (btn) btn.textContent = '清空全部成绩';
+          load(true);
+        });
+    });
   }
 
   /* ---------- 导出 CSV ---------- */
@@ -552,6 +715,20 @@
     backToGate(null);
     $('in-key').focus();
   });
+
+  if ($('ck-all')) {
+    $('ck-all').addEventListener('change', function () {
+      var ids = viewIds();
+      if (this.checked) ids.forEach(function (id) { S.selected.add(id); });
+      else ids.forEach(function (id) { S.selected.delete(id); });
+      render();                       // 整表重绘以同步每行复选框
+    });
+  }
+  if ($('btn-sel-none')) {
+    $('btn-sel-none').addEventListener('click', function () { S.selected.clear(); render(); });
+  }
+  if ($('btn-del-sel')) $('btn-del-sel').addEventListener('click', deleteSelected);
+  if ($('btn-del-all')) $('btn-del-all').addEventListener('click', clearAll);
 
   $('f-class').addEventListener('change', function () { S.filterCls = this.value; render(); });
   $('f-sort').addEventListener('change', function () { S.sort = this.value; render(); });

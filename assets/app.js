@@ -327,6 +327,133 @@
     toast('汇总表已导出');
   }
 
+  /* ---------- 云端成绩上传 ---------- */
+  var CC = window.CLOUD_CONFIG || null;      // assets/cloud-config.js 提供
+  var LS_PEND = 'quiz.pending';              // 上传失败的暂存队列
+  var cloudClient = null;
+
+  function getCloud() {
+    if (cloudClient) return cloudClient;
+    if (!CC) return null;
+    var api = window.WorkBuddyCloud;
+    if (!api || typeof api.createWorkBuddyCloud !== 'function') return null;
+    cloudClient = api.createWorkBuddyCloud({
+      endpoint: CC.endpoint,
+      oauthRelayBaseUrl: CC.oauthRelayBaseUrl,
+      publishableKey: CC.publishableKey,
+    });
+    return cloudClient;
+  }
+
+  function buildPayload() {
+    var R = S.result, e = S.examinee;
+    return {
+      name: e.name, cls: e.cls, sid: e.sid,
+      score: Math.round(R.score * 100) / 100,
+      right_cnt: R.right, wrong_cnt: R.wrong, blank_cnt: R.blank,
+      used_sec: S.elapsed,
+      bank_json: R.byBank,
+    };
+  }
+
+  function pendKey(p) { return p.sid + '|' + p.name + '|' + p.score + '|' + p.used_sec; }
+
+  function addPending(p) {
+    var list = lsGet(LS_PEND, []);
+    var k = pendKey(p);
+    for (var i = 0; i < list.length; i++) if (list[i].key === k) return;
+    list.push({ key: k, payload: p });
+    if (list.length > 50) list = list.slice(-50);
+    lsSet(LS_PEND, list);
+  }
+  function dropPending(k) {
+    lsSet(LS_PEND, lsGet(LS_PEND, []).filter(function (x) { return x.key !== k; }));
+  }
+
+  /* 单条写入云端；resolve 表示成功。
+     注意：不能链 .select()——表上 RLS 只有 INSERT 策略、没有 SELECT 策略，
+     带 RETURNING 的插入会被 PostgreSQL 判为违反行级安全策略。 */
+  function insertRecord(payload) {
+    var cloud = getCloud();
+    if (!cloud) return Promise.reject(new Error('cloud-sdk-unavailable'));
+    return Promise.resolve(cloud.database.from(CC.table).insert(payload))
+      .then(function (res) {
+        if (res && res.error) throw res.error;
+        return true;
+      });
+  }
+
+  /* 把暂存队列里的记录逐条补传 */
+  function flushPending() {
+    var list = lsGet(LS_PEND, []);
+    if (!list.length) return Promise.resolve(0);
+    var ok = 0;
+    return list.reduce(function (chain, entry) {
+      return chain.then(function () {
+        return insertRecord(entry.payload).then(function () {
+          dropPending(entry.key); ok++;
+        }).catch(function () { /* 留着下次再试 */ });
+      });
+    }, Promise.resolve()).then(function () { return ok; });
+  }
+
+  var uploadState = { status: 'idle', msg: '', sub: '' };
+
+  function renderUpload() {
+    var box = $('upload-line');
+    if (!box) return;
+    if (uploadState.status === 'idle') { box.hidden = true; box.innerHTML = ''; return; }
+    box.hidden = false;
+    var cls = uploadState.status === 'ok' ? 'ok' : (uploadState.status === 'err' ? 'err' : 'busy');
+    var html = '<span class="dot"></span><span class="msg">' + esc(uploadState.msg) + '</span>';
+    if (uploadState.sub) html += '<span class="sub">' + esc(uploadState.sub) + '</span>';
+    if (uploadState.status === 'err') {
+      html += '<button class="btn btn-ghost retry" id="btn-retry-upload">重试上传</button>';
+    }
+    box.className = 'upload-line ' + cls;
+    box.innerHTML = html;
+    var btn = $('btn-retry-upload');
+    if (btn) btn.addEventListener('click', function () { submitUpload(false); });
+  }
+
+  var uploadBusy = false;
+
+  function submitUpload(silent) {
+    if (uploadBusy) return;
+    if (!CC) return;
+    uploadBusy = true;
+    var payload = buildPayload();
+    var k = pendKey(payload);
+    if (!silent) {
+      uploadState = { status: 'busy', msg: '正在上传成绩…', sub: '' };
+      renderUpload();
+    }
+    insertRecord(payload).then(function () {
+      dropPending(k);
+      return flushPending();
+    }).then(function (extra) {
+      uploadState = {
+        status: 'ok', msg: '成绩已上传到教师端',
+        sub: extra ? ('含补传 ' + extra + ' 条历史记录') : ('学号 ' + payload.sid + '，教师端可实时查看'),
+      };
+    }).catch(function (err) {
+      addPending(payload);
+      var code = String((err && err.code) || '');
+      var msg = String((err && err.message) || '');
+      var why = code.indexOf('42501') > -1 ? '服务端拒绝了写入'
+        : (msg.indexOf('cloud-sdk-unavailable') > -1 ? '云服务组件未加载，请检查网络后刷新页面' : '网络异常或服务暂时不可用');
+      uploadState = {
+        status: 'err', msg: '成绩上传失败',
+        sub: why + '；已在本机暂存，可点击「重试上传」，不影响本次得分与成绩单下载。',
+      };
+    }).then(function () {
+      uploadBusy = false;
+      renderUpload();
+    });
+  }
+
+  /* 成绩单始终可下载：本地记录 + 云端记录互为备份 */
+
   /* ---------- 屏幕切换 ---------- */
   function show(name) {
     ['screen-start', 'screen-exam', 'screen-result'].forEach(function (id) {
@@ -356,6 +483,8 @@
     });
     $('btn-submit').disabled = false;
     $('btn-submit-top').disabled = false;
+    uploadState = { status: 'idle', msg: '', sub: '' };
+    renderUpload();
     $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
     startTimer();
     show('exam');
@@ -500,6 +629,7 @@
 
     renderResult();
     show('result');
+    submitUpload(false);          // 自动上传成绩（失败则本机暂存，可重试）
   }
 
   /* ---------- 渲染结果页 ---------- */
@@ -771,4 +901,5 @@
 
   /* ---------- 启动 ---------- */
   renderStart();
+  flushPending();               // 启动时补传上次未成功的成绩
 })();

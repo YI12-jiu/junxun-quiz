@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>教师端 · 成绩汇总看板</title>
+<meta name="description" content="综合考核系统教师端：实时汇总全体考生成绩，支持班级筛选、搜索排序、CSV 导出与记录删除。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#128202;</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/teacher.css">
+</head>
+<body>
+
+<!-- ============ 口令门 ============ -->
+<section class="screen active" id="screen-gate">
+  <div class="wrap narrow">
+    <div class="hero">
+      <div class="eyebrow">Teacher Console</div>
+      <h1>教师端成绩汇总</h1>
+      <p>实时汇总全体考生成绩 · 班级筛选 · 导出成绩册</p>
+    </div>
+
+    <div class="rules gate-card">
+      <h2>请输入教师口令</h2>
+      <p class="hint">口令用于保护成绩数据，仅任课教师持有。验证通过后本机将记住口令，下次打开自动进入。</p>
+      <div class="gate-row">
+        <input id="in-key" type="password" placeholder="教师口令" autocomplete="off" spellcheck="false">
+        <button class="btn btn-primary" id="btn-unlock">进入看板</button>
+      </div>
+      <p class="hint err" id="gate-msg" hidden></p>
+      <div class="gate-links">
+        <a href="index.html">← 返回学生端答题</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 看板 ============ -->
+<section class="screen" id="screen-board">
+  <div class="wrap wide">
+    <div class="board-top">
+      <div class="row">
+        <span class="title">教师端 · 成绩汇总看板</span>
+        <span class="pill" id="pill-sync">尚未同步</span>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="btn-refresh">刷新数据</button>
+        <button class="btn btn-ghost" id="btn-csv">导出成绩册（CSV）</button>
+        <button class="btn btn-ghost" id="btn-print">打印 / 导出 PDF</button>
+        <button class="btn btn-ghost" id="btn-lock">锁定</button>
+      </div>
+    </div>
+
+    <div id="load-error" class="alert" hidden></div>
+
+    <div class="stat-grid" id="stat-grid"></div>
+
+    <div class="toolbar">
+      <label class="tb-field">
+        <span>班级</span>
+        <select id="f-class"></select>
+      </label>
+      <label class="tb-field grow">
+        <span>搜索</span>
+        <input id="f-text" type="text" placeholder="输入姓名或学号，支持模糊匹配">
+      </label>
+      <label class="tb-field">
+        <span>排序</span>
+        <select id="f-sort">
+          <option value="time-desc">交卷时间 · 最新在前</option>
+          <option value="time-asc">交卷时间 · 最早在前</option>
+          <option value="score-desc">得分 · 从高到低</option>
+          <option value="score-asc">得分 · 从低到高</option>
+          <option value="class-asc">班级 · 按名称</option>
+        </select>
+      </label>
+      <label class="tb-check">
+        <input type="checkbox" id="f-dedupe" checked>
+        <span>同一学号仅保留最新一次（用于统计与导出）</span>
+      </label>
+    </div>
+
+    <div class="sec-title">
+      <h2>成绩明细</h2>
+      <span class="hint" id="table-hint"></span>
+    </div>
+    <div class="btable" id="board-table"></div>
+
+    <p class="foot-note">
+      得分规则：全卷 40 题，每题 2.5 分，满分 100 分，<b>60 分及格</b>。
+      数据来源为考生交卷时自动上传的云端记录；考生离线交卷的记录会在其下次打开页面时自动补传。
+    </p>
+  </div>
+</section>
+
+<div class="modal-mask" id="modal-mask">
+  <div class="modal">
+    <h3 id="modal-title">提示</h3>
+    <p id="modal-text"></p>
+    <div class="acts">
+      <button class="btn btn-ghost" id="modal-cancel">取消</button>
+      <button class="btn btn-primary" id="modal-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="assets/workbuddy-cloud-sdk.js"></script>
+<script src="assets/cloud-config.js"></script>
+<script src="assets/teacher.js"></script>
+</body>
+</html>

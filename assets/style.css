@@ -287,6 +287,23 @@ kbd {
 }
 .examinee-line b { color: var(--ink); font-weight: 800; }
 
+/* ---------- 成绩上传状态 ---------- */
+.upload-line {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px;
+  margin: 14px 0 0; padding: 10px 14px; border-radius: 12px;
+  font-size: 14px; border: 1px solid var(--line); background: var(--bg-soft); color: var(--ink-2);
+}
+.upload-line .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-3); flex: none; }
+.upload-line .msg { font-weight: 700; }
+.upload-line .sub { color: var(--ink-3); font-size: 13px; }
+.upload-line.ok { border-color: #b7e3cd; background: #f1fbf6; color: #0b6b46; }
+.upload-line.ok .dot { background: var(--ok); }
+.upload-line.err { border-color: #f3c6c6; background: #fdf3f3; color: #a52626; }
+.upload-line.err .dot { background: var(--bad); }
+.upload-line.busy .dot { background: var(--brand); animation: pulse 1s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.upload-line .retry { margin-left: auto; }
+
 .btable { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
 .btable table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .btable th, .btable td { padding: 11px 15px; text-align: left; border-bottom: 1px solid var(--line); }

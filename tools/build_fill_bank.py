@@ -123,9 +123,9 @@ def main():
     ]
 
     OUT_JS.parent.mkdir(parents=True, exist_ok=True)
-    OUT_JS.write_text('\n'.join(lines), encoding='utf-8')
+    OUT_JS.write_text('\n'.join(lines), encoding='utf-8', newline='\n')
     OUT_JSON.parent.mkdir(parents=True, exist_ok=True)
-    OUT_JSON.write_text(json.dumps(QUESTIONS, ensure_ascii=False, indent=2), encoding='utf-8')
+    OUT_JSON.write_text(json.dumps(QUESTIONS, ensure_ascii=False, indent=2), encoding='utf-8', newline='\n')
 
     total_blanks = sum(len(it['blanks']) for it in QUESTIONS)
     print('已生成 %s' % OUT_JS)

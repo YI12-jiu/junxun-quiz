@@ -716,6 +716,24 @@
     $('in-key').focus();
   });
 
+  /* 退出教师端：清掉本机记住的口令与身份，回到学生端答题页。
+     与「锁定」的区别 —— 锁定只是退出登录、仍留在教师端；退出则直接离开教师端。 */
+  function leaveToStudent() {
+    try { window.location.href = 'index.html'; } catch (e) { /* 测试环境不支持跳转 */ }
+  }
+
+  if ($('btn-exit')) {
+    $('btn-exit').addEventListener('click', function () {
+      confirmBox('退出教师端',
+        '将<b>退出登录</b>并返回学生端答题页。<br>本机记住的教师口令与登录身份会被清除，下次进入需要重新输口令。',
+        '退出教师端', '取消').then(function (ok) {
+        if (!ok) return;
+        backToGate(null);
+        leaveToStudent();
+      });
+    });
+  }
+
   if ($('ck-all')) {
     $('ck-all').addEventListener('change', function () {
       var ids = viewIds();

@@ -118,6 +118,10 @@
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* 退出教师端：与「锁定」区分开，用描边强调这是离开当前页面的动作 */
+.board-top .btn-exit { border-color: var(--line-2); color: var(--ink-2); }
+.board-top .btn-exit:hover { border-color: var(--brand); color: var(--brand); background: var(--brand-soft); }
+
 /* ---------- 批量操作条 ---------- */
 .selbar {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;

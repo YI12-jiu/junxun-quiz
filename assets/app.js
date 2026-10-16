@@ -23,6 +23,34 @@
   var BANK_META  = window.BANK_META || {};
   var BANKS      = window.BANKS || {};
 
+  /* ---------- 题库按需加载 ----------
+     assets/banks.js 有 106KB，占首屏体积的一半。它只在「开始答题」之后才用得到，
+     因此改成异步加载：首屏先把页面画出来，题库在后台并行下载，加载完回填并刷新首页统计。 */
+  var banksReady = !!(window.BANKS && Object.keys(window.BANKS).length);
+  var banksCbs = [];
+
+  window.__banksReady = function () {
+    BANKS = window.BANKS || {};
+    BANK_META = window.BANK_META || {};
+    banksReady = true;
+    var cbs = banksCbs.slice();
+    banksCbs.length = 0;
+    cbs.forEach(function (f) { try { f(); } catch (e) {} });
+    try { renderStart(); } catch (e) {}
+  };
+
+  /* 题库就绪后回调；超时则回调失败原因，避免考生卡在「正在准备」 */
+  function whenBanksReady(cb, timeoutMs) {
+    if (banksReady) { cb(null); return; }
+    var done = false;
+    banksCbs.push(function () { if (!done) { done = true; cb(null); } });
+    setTimeout(function () {
+      if (done) return;
+      done = true;
+      cb(banksReady ? null : new Error('题库加载超时，请检查网络后刷新页面重试'));
+    }, timeoutMs || 20000);
+  }
+
   /* 参与组卷的题库顺序（去重），结果页与成绩单按这个顺序列分题库得分 */
   var BANK_ORDER = (function () {
     var out = [];
@@ -181,7 +209,7 @@
     return out;
   }
 
-  function buildPaper(mode) {
+  function buildPaper() {
     var paper = [];
     RULES.forEach(function (rule) {
       var banks   = rule.banks || [rule.bank];
@@ -208,12 +236,8 @@
       shuffle(picked).forEach(function (x) { paper.push(makeItem(x.bank, x.q)); });
     });
 
-    if (mode === 'grouped') {
-      var order = ['zib', 'saf', 'mil', 'stu'];
-      paper.sort(function (a, b) { return order.indexOf(a.bank) - order.indexOf(b.bank); });
-    } else {
-      shuffle(paper);
-    }
+    // 题目顺序固定为随机混合（不再提供「按题库分组」，避免同类题目扎堆）
+    shuffle(paper);
     return paper;
   }
 
@@ -243,10 +267,10 @@
   }
 
   var lastSig = '';
-  function newPaper(mode) {
+  function newPaper() {
     var paper, sig, tries = 0;
     do {
-      paper = buildPaper(mode);
+      paper = buildPaper();
       sig = signature(paper);
       tries++;
     } while (sig === lastSig && tries < 8);
@@ -259,7 +283,6 @@
   var LS_REC = 'quiz.records';
 
   var S = {
-    mode: 'random',
     examinee: { name: '', cls: '', sid: '' },
     paper: [],
     idx: 0,
@@ -279,6 +302,12 @@
 
   /* ---------- 首页 ---------- */
   function renderStart() {
+    if (!banksReady) {
+      $('start-stats').innerHTML = '<div class="stat"><div class="k">正在准备</div>' +
+        '<div class="v">题库加载中<em> 请稍候</em></div></div>';
+      $('start-rules').innerHTML = '<li class="hint">正在加载题库…（不影响先填写考生信息）</li>';
+      return;
+    }
     var usedBanks = [];
     RULES.forEach(function (r) {
       (r.banks || [r.bank]).forEach(function (b) { if (usedBanks.indexOf(b) < 0) usedBanks.push(b); });
@@ -328,14 +357,6 @@
         ' 题：' + typ.join(' / ') + '）</span></li>';
     }).join('');
     $('start-rules').innerHTML = rows;
-
-    // 选项顺序切换
-    $('order-seg').addEventListener('click', function (e) {
-      var b = e.target.closest('button'); if (!b) return;
-      Array.prototype.forEach.call(this.children, function (c) { c.classList.remove('on'); });
-      b.classList.add('on');
-      S.mode = b.dataset.mode;
-    });
 
     // 恢复上次填写的考生信息
     var saved = lsGet(LS_ID, null);
@@ -452,6 +473,26 @@
   var LS_PEND = 'quiz.pending';              // 上传失败的暂存队列
   var cloudClient = null;
 
+  /* 云 SDK 有 72KB，只在「交卷上传」时用得到，因此也从首屏挪走：按需注入 + 后台预热 */
+  var sdkPromise = null;
+  function ensureSdk() {
+    var api = window.WorkBuddyCloud;
+    if (api && typeof api.createWorkBuddyCloud === 'function') return Promise.resolve(true);
+    if (sdkPromise) return sdkPromise;
+    sdkPromise = new Promise(function (resolve) {
+      var el = document.createElement('script');
+      el.src = 'assets/workbuddy-cloud-sdk.js';
+      el.async = true;
+      el.onload = function () {
+        var a = window.WorkBuddyCloud;
+        resolve(!!(a && typeof a.createWorkBuddyCloud === 'function'));
+      };
+      el.onerror = function () { sdkPromise = null; resolve(false); };
+      document.head.appendChild(el);
+    });
+    return sdkPromise;
+  }
+
   function getCloud() {
     if (cloudClient) return cloudClient;
     if (!CC) return null;
@@ -499,13 +540,15 @@
      注意：不能链 .select()——表上 RLS 只有 INSERT 策略、没有 SELECT 策略，
      带 RETURNING 的插入会被 PostgreSQL 判为违反行级安全策略。 */
   function insertRecord(payload) {
-    var cloud = getCloud();
-    if (!cloud) return Promise.reject(new Error('cloud-sdk-unavailable'));
-    return Promise.resolve(cloud.database.from(CC.table).insert(payload))
-      .then(function (res) {
-        if (res && res.error) throw res.error;
-        return true;
-      });
+    return ensureSdk().then(function (ok) {
+      if (!ok) throw new Error('cloud-sdk-unavailable');
+      var cloud = getCloud();
+      if (!cloud) throw new Error('cloud-sdk-unavailable');
+      return cloud.database.from(CC.table).insert(payload);
+    }).then(function (res) {
+      if (res && res.error) throw res.error;
+      return true;
+    });
   }
 
   /* 把暂存队列里的记录逐条补传 */
@@ -928,6 +971,23 @@
     lsSet(LS_ID, id);
 
     var btn = $('btn-start');
+    if (!banksReady) {
+      // 题库是异步加载的，通常早已就绪；万一点得太快就等一下
+      btn.disabled = true;
+      btn.textContent = '正在准备题库…';
+      whenBanksReady(function (err) {
+        btn.disabled = false;
+        btn.textContent = '开始答题';
+        if (err) { toast(err.message); return; }
+        beginExam2();
+      });
+      return;
+    }
+    beginExam2();
+  }
+
+  function beginExam2() {
+    var btn = $('btn-start');
     btn.disabled = true;
     btn.textContent = '正在准备考场…';
     suppressGuard(20000);                  // 全屏 + 麦克风授权期间自身造成的失焦不算违规
@@ -948,7 +1008,7 @@
   }
 
   function startExam() {
-    S.paper = newPaper(S.mode);
+    S.paper = newPaper();
     S.idx = 0;
     S.graded = false;
     S.filter = 'wrong';
@@ -970,6 +1030,7 @@
     startTimer();
     show('exam');
     renderExam();
+    ensureSdk();                  // 后台静默拉取云 SDK，等 35 分钟后交卷时早已就绪
   }
 
   /* ---------- 倒计时（限时 1 小时，归零自动交卷） ---------- */

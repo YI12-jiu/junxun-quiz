@@ -79,11 +79,7 @@
     </div>
 
     <div class="start-bar">
-      <span class="hint">题目顺序</span>
-      <div class="seg" id="order-seg">
-        <button data-mode="random" class="on">随机混合</button>
-        <button data-mode="grouped">按题库分组</button>
-      </div>
+      <span class="hint">题目顺序：随机混合（每次组卷都会重新打乱，不会按题库分组）</span>
       <div class="spacer"></div>
       <a class="btn btn-ghost" href="teacher.html">教师端成绩汇总</a>
       <button class="btn btn-primary" id="btn-start">开始答题</button>
@@ -190,9 +186,11 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="assets/workbuddy-cloud-sdk.js"></script>
+<!-- 首屏加速：只同步加载 app.js（其余两个大文件按需/后台加载）
+     · banks.js 106KB：考完之后才需要，异步加载，加载完回调 __banksReady
+     · 云 SDK 72KB：只在交卷上传需要，开考后在后台静默拉取 -->
 <script src="assets/cloud-config.js"></script>
-<script src="assets/banks.js"></script>
 <script src="assets/app.js"></script>
+<script async src="assets/banks.js" onload="window.__banksReady&&window.__banksReady()"></script>
 </body>
 </html>

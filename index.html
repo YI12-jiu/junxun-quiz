@@ -52,7 +52,7 @@
         <div class="ban-item"><b>② 截屏</b><span>按下截屏键，或调用系统 / 第三方截图工具</span></div>
         <div class="ban-item"><b>③ 分屏</b><span>退出全屏、把窗口缩到半屏或调整窗口尺寸</span></div>
         <div class="ban-item"><b>④ 复制粘贴</b><span>Ctrl / Cmd + C、V、X，以及右键菜单</span></div>
-        <div class="ban-item"><b>⑤ 声音</b><span>持续环境声音（需授权麦克风，未授权则不监测并如实标注）</span></div>
+        <div class="ban-item"><b>⑤ 声音</b><span>环境声音超过 <b>25 dB</b> 并持续约 0.5 秒（需授权麦克风，未授权则不监测并如实标注）</span></div>
       </div>
       <label class="agree">
         <input type="checkbox" id="agree-rules">
@@ -66,14 +66,13 @@
       <ul id="start-rules"></ul>
       <h2>考试说明</h2>
       <ul>
-        <li>全卷共 <b>40</b> 题（填空 10 · 多选 10 · 单选 20），每题 <b>2.5</b> 分，满分 <b>100</b> 分，限时 <b>60</b> 分钟。</li>
-        <li>每道题自动标注「填空 / 单选 / 多选」标识，并标出来源题库。</li>
-        <li>填空题只需填写空格处的内容，不要抄写题干；多空题<b>全部答对才得分</b>，标点与写法差异不影响判分。</li>
+        <li>全卷共 <b>40</b> 题，每题 <b>2.5</b> 分，满分 <b>100</b> 分，限时 <b>60</b> 分钟。</li>
+        <li>每道题自动标注「单选 / 多选」标识，并标出来源题库。</li>
         <li>单选题仅 1 个正确答案；多选题有多个正确答案，<b>少选、多选、错选均不得分</b>。</li>
         <li>交卷后自动判分并立即显示最终得分，未作答的题目按答错计分。</li>
         <li>交卷后自动生成错题回溯，完整展示题目、全部选项、你的答案和标准答案。</li>
         <li>每次进入或点击「重新抽题」都会重新随机组卷，同一份试卷内不会出现重复题目。</li>
-        <li>答题中支持键盘操作：选择题按 <b>A~H / 1~8</b>，<b>← →</b> 翻页；填空题用 <b>Tab</b> 在空格间切换。</li>
+        <li>答题中支持键盘操作：按 <b>A~H / 1~8</b> 选择选项，<b>← →</b> 翻页。</li>
       </ul>
     </div>
 
@@ -191,7 +190,6 @@
 <script src="assets/workbuddy-cloud-sdk.js"></script>
 <script src="assets/cloud-config.js"></script>
 <script src="assets/banks.js"></script>
-<script src="assets/banks_fill.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>

@@ -372,6 +372,12 @@ kbd {
 }
 .guard-bar .gitem.off { background: #f1f5f9; color: var(--ink-3); border-color: var(--line-2); }
 .guard-bar .gnote { color: var(--warn); font-weight: 700; }
+.guard-bar .gmeter {
+  border-radius: 999px; padding: 2px 10px; font-weight: 700;
+  background: var(--bg-soft); color: var(--ink-2); border: 1px solid var(--line-2);
+  font-variant-numeric: tabular-nums;
+}
+.guard-bar .gmeter.over { background: var(--bad-soft); color: var(--bad); border-color: #f3c6c6; }
 
 .time-banner {
   margin-top: 9px; padding: 8px 14px; border-radius: 10px; font-size: 14px; font-weight: 700;

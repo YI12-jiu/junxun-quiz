@@ -5,19 +5,23 @@
 (function () {
   'use strict';
 
-  /* ---------- 抽题规则（严格按要求配置） ---------- */
-  /* 全卷 40 题：填空 10 + 多选 10 + 单选 20，每题 2.5 分，满分 100 分 */
+  /* ---------- 抽题规则（恢复为最初的规则） ---------- */
+  /* 全卷 40 题：安全知识 4 题（单选/多选不限）+ 军事技能训练理论 23 题（其中多选 6）
+     + 学生手册 13 题（其中多选 4）；每题 2.5 分，满分 100 分。
+     填空题已按要求下线 —— assets/banks_fill.js 与判分代码仍保留，
+     需要重新启用时在下面加回 { bank: 'zib', fill: 10, ... } 并在 index.html 引入该文件即可。 */
   var RULES = [
-    { bank: 'zib', fill: 10, multi: 0, single: 0  },  // 自编题（校情校史）：10 道填空
-    { bank: 'mil', fill: 0,  multi: 6, single: 11 },  // 军事技能训练理论：多选 6 + 单选 11
-    { bank: 'stu', fill: 0,  multi: 4, single: 6  },  // 学生手册：多选 4 + 单选 6
-    { bank: 'saf', fill: 0,  multi: 0, single: 3  },  // 安全知识：单选 3
+    { bank: 'saf', fill: 0, multi: 0, single: 0,  any: 4 },  // 安全知识：4 题，题型不限
+    { bank: 'mil', fill: 0, multi: 6, single: 17, any: 0 },  // 军事技能训练理论：23 题，其中多选 6
+    { bank: 'stu', fill: 0, multi: 4, single: 9,  any: 0 },  // 学生手册：13 题，其中多选 4
   ];
   var PER_SCORE  = 2.5;                        // 每题 2.5 分
   var FULL_SCORE = 100;                        // 满分 100 分
   var PASS_SCORE = 60;                         // 及格线
   var LIMIT_SEC  = 60 * 60;                    // 单次考核限时：1 小时
-  var TOTAL_Q    = RULES.reduce(function (n, r) { return n + r.fill + r.multi + r.single; }, 0); // 40
+  var TOTAL_Q    = RULES.reduce(function (n, r) {
+    return n + (r.any || 0) + r.fill + r.multi + r.single;
+  }, 0); // 40
   var BANK_META  = window.BANK_META || {};
   var BANKS      = window.BANKS || {};
 
@@ -170,14 +174,19 @@
       var singles = pool.filter(function (x) { return x.t !== 'M' && x.t !== 'F'; });
 
       var picked = [];
+      if (rule.any) {                                  // 题型不限：从该库全部题目里随机抽
+        var rest = pool.filter(function (x) { return x.t !== 'F'; });
+        picked = picked.concat(shuffle(rest.slice()).slice(0, Math.min(rule.any, rest.length)));
+      }
       if (rule.fill)   picked = picked.concat(shuffle(fills.slice()).slice(0, Math.min(rule.fill, fills.length)));
       if (rule.multi)  picked = picked.concat(shuffle(multis.slice()).slice(0, Math.min(rule.multi, multis.length)));
       if (rule.single) picked = picked.concat(shuffle(singles.slice()).slice(0, Math.min(rule.single, singles.length)));
 
-      var want = rule.fill + rule.multi + rule.single;
+      var want = (rule.any || 0) + rule.fill + rule.multi + rule.single;
       if (picked.length !== want) {
         throw new Error('题库题量不足：「' + ((BANK_META[rule.bank] || {}).name || rule.bank) +
-          '」需要 ' + want + ' 题（填空 ' + rule.fill + ' / 多选 ' + rule.multi + ' / 单选 ' + rule.single +
+          '」需要 ' + want + ' 题（题型不限 ' + (rule.any || 0) + ' / 填空 ' + rule.fill +
+          ' / 多选 ' + rule.multi + ' / 单选 ' + rule.single +
           '），实际只抽到 ' + picked.length + ' 题；该库现有填空 ' + fills.length +
           ' 题、多选 ' + multis.length + ' 题、单选 ' + singles.length + ' 题。');
       }
@@ -256,12 +265,20 @@
   /* ---------- 首页 ---------- */
   function renderStart() {
     var bankTotal = RULES.reduce(function (n, r) { return n + (BANKS[r.bank] || []).length; }, 0);
+    var comp = RULES.reduce(function (a, r) {
+      a.fill += r.fill; a.multi += r.multi; a.single += r.single; a.any += (r.any || 0); return a;
+    }, { fill: 0, multi: 0, single: 0, any: 0 });
+    var compTxt = [];
+    if (comp.fill) compTxt.push('填空 ' + comp.fill);
+    if (comp.multi) compTxt.push('多选 ' + (comp.any ? comp.multi + '~' + (comp.multi + comp.any) : comp.multi));
+    if (comp.single) compTxt.push('单选 ' + (comp.any ? comp.single + '~' + (comp.single + comp.any) : comp.single));
+
     var cards = [
-      { k: '全卷题量', v: TOTAL_Q, s: '题（填空 10 · 多选 10 · 单选 20）' },
+      { k: '全卷题量', v: TOTAL_Q, s: '题（' + compTxt.join(' · ') + '）' },
       { k: '每题分值', v: PER_SCORE, s: '分' },
       { k: '试卷满分', v: FULL_SCORE, s: '分' },
       { k: '考核限时', v: 60, s: '分钟，到时自动交卷' },
-      { k: '题库总量', v: bankTotal, s: '题（四库合并）' },
+      { k: '题库总量', v: bankTotal, s: '题（' + RULES.length + ' 个题库合并）' },
     ];
     $('start-stats').innerHTML = cards.map(function (c) {
       return '<div class="stat"><div class="k">' + esc(c.k) + '</div>' +
@@ -276,10 +293,16 @@
       if (r.fill)   parts.push('填空 <b>' + r.fill + '</b> 题');
       if (r.multi)  parts.push('多选 <b>' + r.multi + '</b> 题');
       if (r.single) parts.push('单选 <b>' + r.single + '</b> 题');
+      if (r.any)    parts.push('单选/多选不限 <b>' + r.any + '</b> 题');
+      var tot = (r.any || 0) + r.fill + r.multi + r.single;
+      var singleN = pool.length - cnt('F') - cnt('M');
+      var typ = [];
+      if (cnt('F')) typ.push('填空 ' + cnt('F'));
+      if (cnt('M')) typ.push('多选 ' + cnt('M'));
+      if (singleN) typ.push('单选 ' + singleN);
       return '<li><b>' + esc(m.name) + '</b>：随机抽 ' + parts.join(' + ') +
-        '（共 ' + (r.fill + r.multi + r.single) + ' 题）　<span class="hint">（题库 ' + pool.length +
-        ' 题：填空 ' + cnt('F') + ' / 多选 ' + cnt('M') + ' / 单选 ' + (pool.length - cnt('F') - cnt('M')) +
-        '）</span></li>';
+        '（共 ' + tot + ' 题）　<span class="hint">（题库 ' + pool.length +
+        ' 题：' + typ.join(' / ') + '）</span></li>';
     }).join('');
     $('start-rules').innerHTML = rows;
 
@@ -553,7 +576,8 @@
     fsOk: false,           // 浏览器是否支持并成功进入全屏
     soundOk: false,        // 是否成功开启麦克风声音监测
     soundHits: 0,
-    soundPeak: 0,
+    soundDb: -100,         // 当前环境声音电平（dBFS）
+    soundPeakDb: -100,     // 本次考核测到的最高电平
     soundTimer: null,
     soundBuf: null,
     audioCtx: null,
@@ -562,8 +586,14 @@
     watchTimer: null,
   };
 
-  var SOUND_THRESHOLD = 16;    // 时域峰值相对 128 的偏移量；安静时通常小于 6
-  var SOUND_STRIKES   = 12;    // 连续命中次数（每 100ms 一次，约 1.2 秒）
+  /* ---------- 环境声音限值 ----------
+     浏览器只能测「相对满量程电平」（dBFS），无法测真实声压级（dB SPL 需要校准过的麦克风），
+     所以这里的「25 分贝」实现为：瞬时声级超过 -25 dBFS 即视为超标。
+     参考：安静房间约 -55 dBFS，小声交谈约 -40 dBFS，正常说话约 -25 ~ -30 dBFS，数值越大越吵。
+     超标需连续保持 SOUND_HOLD 次采样才判违规，避免单次爆音（关门、咳嗽）误伤。 */
+  var SOUND_DB_LIMIT = -25;    // 限值（dBFS），超过即违规
+  var SOUND_HOLD     = 5;      // 连续超标次数（每 100ms 一次，约 0.5 秒）
+  var SOUND_FLOOR    = -100;   // 电平下限，避免 log(0)
   var SPLIT_MIN_SCREEN = 1100; // 屏幕窄于此值时不判定分屏（避免小屏误报）
 
   /* 设定抑制窗口：ms 毫秒内不判定违规。
@@ -589,6 +619,9 @@
     GUARD.armed = true;
     GUARD.fired = false;
     GUARD.splitSince = 0;
+    GUARD.soundHits = 0;
+    GUARD.soundDb = SOUND_FLOOR;
+    GUARD.soundPeakDb = SOUND_FLOOR;
     S.violation = null;
     S.timedOut = false;
     S.warned = 0;
@@ -634,21 +667,38 @@
       GUARD.soundTimer = setInterval(function () {
         if (!guardActive() || !GUARD.soundBuf) return;
         analyser.getByteTimeDomainData(GUARD.soundBuf);
-        var peak = 0;
+        var sum = 0;
         for (var i = 0; i < GUARD.soundBuf.length; i++) {
-          var d = Math.abs(GUARD.soundBuf[i] - 128);
-          if (d > peak) peak = d;
+          var v = (GUARD.soundBuf[i] - 128) / 128;
+          sum += v * v;
         }
-        if (peak > GUARD.soundPeak) GUARD.soundPeak = peak;
-        if (peak > SOUND_THRESHOLD) GUARD.soundHits++;
+        var rms = Math.sqrt(sum / GUARD.soundBuf.length);
+        var db = rms > 0 ? 20 * Math.log10(rms) : SOUND_FLOOR;
+        if (!isFinite(db) || db < SOUND_FLOOR) db = SOUND_FLOOR;
+        GUARD.soundDb = db;
+        if (db > GUARD.soundPeakDb) GUARD.soundPeakDb = db;
+        renderSoundMeter();
+
+        if (db > SOUND_DB_LIMIT) GUARD.soundHits++;
         else if (GUARD.soundHits > 0) GUARD.soundHits--;
-        if (GUARD.soundHits >= SOUND_STRIKES) {
-          trip('sound', '检测到持续环境声音（峰值 ' + peak + '/128，持续约 ' +
-            (SOUND_STRIKES / 10).toFixed(1) + ' 秒）');
+        if (GUARD.soundHits >= SOUND_HOLD) {
+          trip('sound', '环境声音 ' + db.toFixed(1) + ' dB，超过限值 ' + SOUND_DB_LIMIT +
+            ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒');
         }
       }, 100);
       return true;
     }).catch(function () { GUARD.soundOk = false; return false; });
+  }
+
+  /* 实时声级显示：让考生自己看得见当前电平与限值的差距 */
+  function renderSoundMeter() {
+    var el = $('sound-meter');
+    if (!el) return;
+    var db = GUARD.soundDb;
+    var over = db > SOUND_DB_LIMIT;
+    el.className = 'gmeter' + (over ? ' over' : '');
+    el.textContent = '环境声音 ' + (db <= SOUND_FLOOR ? '--' : db.toFixed(1)) +
+      ' dB　限值 ' + SOUND_DB_LIMIT + ' dB';
   }
   function stopSoundMonitor() {
     clearInterval(GUARD.soundTimer);
@@ -849,7 +899,10 @@
     el.innerHTML = items.map(function (it) {
       return '<span class="gitem ' + (it[1] ? 'on' : 'off') + '">' + (it[1] ? '✔' : '✖') + ' ' + esc(it[0]) + '</span>';
     }).join('') +
-      (GUARD.soundOk ? '' : '<span class="gnote">未取得麦克风授权，本次不监测环境声音（成绩单会如实标注）</span>');
+      (GUARD.soundOk
+        ? '<span class="gmeter" id="sound-meter">环境声音 -- dB　限值 ' + SOUND_DB_LIMIT + ' dB</span>'
+        : '<span class="gnote">未取得麦克风授权，本次不监测环境声音（成绩单会如实标注）</span>');
+    if (GUARD.soundOk) renderSoundMeter();
   }
 
   /* ---------- 渲染答题页 ---------- */
@@ -1275,7 +1328,10 @@
       (S.violation
         ? '<b>考核状态：违规（' + esc(VIOLATIONS[S.violation.code] || S.violation.code) + '）</b>，系统已立即交卷。'
         : (S.timedOut ? '<b>考核状态：超时自动交卷</b>。' : '考核状态：正常交卷。')) +
-      '　环境声音监测：' + (GUARD.soundOk ? '已开启' : '未开启（未取得麦克风授权）') + '。</p>');
+      '　环境声音监测：' + (GUARD.soundOk
+        ? '已开启（限值 ' + SOUND_DB_LIMIT + ' dB，本次最高 ' +
+          (GUARD.soundPeakDb <= SOUND_FLOOR ? '--' : GUARD.soundPeakDb.toFixed(1)) + ' dB）'
+        : '未开启（未取得麦克风授权）') + '。</p>');
 
     h.push('<h2>二、分题库得分</h2>');
     h.push('<table><tr><th>来源题库</th><th>抽题数</th><th>答对</th><th>答错</th><th>得分</th></tr>');

@@ -295,6 +295,7 @@
     result: null,
     finishedAt: '',
     violation: null,          // { code, detail, at }
+    strikes: {},              // 「首次警告、再次交卷」的计数：{ leave: n, split: n }
     timedOut: false,          // 是否因超时自动交卷
     warned: 0,                // 已提示过的剩余时间档位
     focusFill: false,
@@ -680,6 +681,8 @@
     soundDb: 0,            // 当前环境声音等级（0~100 相对声级）
     soundPeakDb: 0,        // 本次考核测到的最高等级
     soundFloat: true,      // 是否用浮点采样（精度更高）
+    soundWarnAt: 0,        // 上次声音警告的时间（弹窗冷却用）
+    strikeGraceUntil: 0,   // 警告后的宽限截止时间
     soundTimer: null,
     soundBuf: null,
     audioCtx: null,
@@ -697,7 +700,7 @@
      另：采样必须用 getFloatTimeDomainData（浮点）而不是 8 位版本 ——
      8 位量化下「任何非静音」的底噪就有 58，限值定得低会退化成「有声音就触发」。 */
   var SOUND_DB_LIMIT = 50;     // 限值（0~100 相对声级），超过即记录
-  var SOUND_HOLD     = 5;      // 连续超标次数（每 100ms 一次，约 0.5 秒）
+  var SOUND_HOLD     = 15;     // 连续超标次数（每 100ms 一次，约 1.5 秒）
   var SOUND_FLOOR    = 0;      // 声级下限
   var SPLIT_MIN_SCREEN = 1100; // 桌面端：屏幕窄于此值时不判定分屏（避免小屏误报）
   var MOBILE_SPLIT_RATIO = 0.6;// 手机端：可视高度不足屏幕高度的 60% 视为分屏/悬浮窗
@@ -746,8 +749,46 @@
     renderSoundMeter();
   }
 
+  /* 首次只警告、再次才交卷的行为（按需求：退出界面 / 分屏 各有 2 次机会） */
+  var STAGED_LIMIT = { leave: 2, split: 2 };
+  var STRIKE_GRACE = 3000;   // 警告后给 3 秒宽限，让学生有机会把窗口调回来
+
+  function inStrikeGrace() { return Date.now() < (GUARD.strikeGraceUntil || 0); }
+
+  /* 警告弹窗：不交卷，只让考生明确知道「已经是第几次、还剩几次机会」 */
+  function warnStudent(code, detail, n, limit) {
+    var el = $('warning-mask');
+    if (!el) { toast('警告：' + (VIOLATIONS[code] || code) + '（第 ' + n + ' 次）'); return; }
+    $('warning-title').textContent = '第 ' + n + ' 次警告：' + (VIOLATIONS[code] || code);
+    $('warning-text').innerHTML = esc(detail) + '<br>这是第 <b>' + n + '</b> 次，还有 <b>' +
+      (limit - n) + '</b> 次机会；<b>再次发生将立即自动交卷</b>。';
+    el.hidden = false;
+  }
+
+  /* 声音超标：只警告 + 记录，不交卷 */
+  function warnSound(detail) {
+    var el = $('warning-mask');
+    if (!el) { toast('警告：环境声音超标'); return; }
+    $('warning-title').textContent = '警告：环境声音超标';
+    $('warning-text').innerHTML = esc(detail) +
+      '<br>请保持考场安静。<b>本次不会交卷</b>，但该情况会被记录，交卷时一并上报教师端。';
+    el.hidden = false;
+  }
+
   function trip(code, detail) {
     if (!guardActive()) return false;
+    var limit = STAGED_LIMIT[code];
+    if (limit) {
+      var n = (S.strikes[code] || 0) + 1;
+      S.strikes[code] = n;
+      if (n < limit) {
+        GUARD.strikeGraceUntil = Date.now() + STRIKE_GRACE;
+        GUARD.splitSince = 0;
+        GUARD.msplitSince = 0;
+        warnStudent(code, detail, n, limit);
+        return false;                              // 第 1 次只警告
+      }
+    }
     GUARD.fired = true;
     S.violation = { code: code, detail: detail, at: new Date() };
     try { grade({ violation: S.violation }); } catch (e) {}
@@ -763,7 +804,9 @@
     GUARD.soundHits = 0;
     GUARD.soundDb = SOUND_FLOOR;
     GUARD.soundPeakDb = SOUND_FLOOR;
+    GUARD.strikeGraceUntil = 0;
     S.violation = null;
+    S.strikes = {};
     S.timedOut = false;
     S.warned = 0;
   }
@@ -832,9 +875,14 @@
         if (db > SOUND_DB_LIMIT) GUARD.soundHits++;
         else if (GUARD.soundHits > 0) GUARD.soundHits--;
         if (GUARD.soundHits >= SOUND_HOLD) {
-          GUARD.soundHits = 0;                 // 复位，避免持续超标时每 0.5 秒重复触发
-          flagSound('环境声音 ' + db + ' dB，超过限值 ' + SOUND_DB_LIMIT +
-            ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒', db);
+          GUARD.soundHits = 0;                 // 复位，避免持续超标时反复累加
+          var sMsg = '环境声音 ' + db + ' dB，超过限值 ' + SOUND_DB_LIMIT +
+            ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒';
+          flagSound(sMsg, db);                 // 只记录，不交卷
+          if (Date.now() - (GUARD.soundWarnAt || 0) > 15000) {
+            GUARD.soundWarnAt = Date.now();
+            warnSound(sMsg);                   // 弹一次警告（15 秒冷却，避免连续弹）
+          }
         }
       }, 100);
       return true;
@@ -946,6 +994,7 @@
   /* ---- 周期性巡检：分屏 / 全屏状态 ---- */
   function checkSplit() {
     if (!guardActive()) { GUARD.splitSince = 0; return; }
+    if (inStrikeGrace()) { GUARD.splitSince = 0; return; }   // 刚警告过，给时间恢复
     // 小屏设备交给下面的「可视高度」规则：手机上 outerWidth 的语义不可靠，
     // 若照搬桌面规则可能整场考试都被误判为分屏。
     if (isSmallScreen()) { GUARD.splitSince = 0; return; }
@@ -967,6 +1016,7 @@
      输入法弹出同样会压矮视口，因此刚碰过输入框的 2.5 秒内不判定。 */
   function checkMobileSplit() {
     if (!guardActive()) { GUARD.msplitSince = 0; return; }
+    if (inStrikeGrace()) { GUARD.msplitSince = 0; return; }  // 刚警告过，给时间恢复
     if (!isSmallScreen()) { GUARD.msplitSince = 0; return; }
     var sh = (window.screen && window.screen.height) || 0;
     var ih = window.innerHeight || 0;
@@ -1063,7 +1113,7 @@
     uploadState = { status: 'idle', msg: '', sub: '' };
     renderUpload();
     $('violation-mask').hidden = true;
-    renderWatermark();
+    if ($('warning-mask')) $('warning-mask').hidden = true;
     renderGuardStatus();
     $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
     armGuard();
@@ -1114,22 +1164,6 @@
   }
   function stopTimer() { clearInterval(S.timer); S.timer = null; }
 
-  /* 屏幕水印：手机系统截图无法被网页检测，用带考生身份的水印做追溯威慑 */
-  function renderWatermark() {
-    var el = $('watermark');
-    if (!el) return;
-    var e = S.examinee || {};
-    var txt = [e.name, e.sid, e.cls].filter(Boolean).join(' ');
-    if (!txt) { el.innerHTML = ''; return; }
-    var now = new Date();
-    function p(n) { return (n < 10 ? '0' : '') + n; }
-    var stamp = now.getFullYear() + '-' + p(now.getMonth() + 1) + '-' + p(now.getDate());
-    var unit = txt + '　' + stamp;
-    var html = '';
-    for (var i = 0; i < 40; i++) html += '<i>' + esc(unit) + '</i>';
-    el.innerHTML = html;
-  }
-
   /* 考场状态条：说明当前哪几项管控已生效 */
   function renderGuardStatus() {
     var el = $('guard-status');
@@ -1141,7 +1175,6 @@
       ['复制粘贴拦截', true],
       ['环境声音监测（超标仅记录，不交卷）', GUARD.soundOk],
     ];
-    items.push(['屏幕水印追溯', true]);
     el.innerHTML = items.map(function (it) {
       return '<span class="gitem ' + (it[1] ? 'on' : 'off') + '">' + (it[1] ? '✔' : '✖') + ' ' + esc(it[0]) + '</span>';
     }).join('') +
@@ -1694,6 +1727,10 @@
 
   /* ---------- 按钮绑定 ---------- */
   $('btn-start').addEventListener('click', beginExam);
+  if ($('warning-ok')) {
+    $('warning-ok').addEventListener('click', function () { $('warning-mask').hidden = true; });
+  }
+
   $('btn-submit').addEventListener('click', submit);
   $('btn-submit-top').addEventListener('click', submit);
   $('btn-doc').addEventListener('click', downloadDoc);

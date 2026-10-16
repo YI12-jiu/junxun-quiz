@@ -48,11 +48,11 @@
         <li>考试期间以下行为会被实时检测，<b>一经触发立即交卷</b>，同时记录违规、上报教师端，并在该次考核名单中<b>标红</b>：</li>
       </ul>
       <div class="ban-grid">
-        <div class="ban-item"><b>① 退出界面</b><span>电脑：切换标签页、最小化、切到其他窗口或程序。<br>手机 / 平板：切到其他 App、退到后台、锁屏</span></div>
-        <div class="ban-item"><b>② 截屏</b><span>电脑：按下截屏键（PrintScreen）。<br>手机：系统截图<b>无法被网页检测</b>（任何网站都做不到），因此考试页会叠加你的姓名学号水印，截图外传可追溯</span></div>
-        <div class="ban-item"><b>③ 分屏</b><span>电脑：退出全屏、把窗口缩到半屏。<br>手机 / 平板：分屏、悬浮窗导致可视区域明显变矮</span></div>
-        <div class="ban-item"><b>④ 复制粘贴</b><span>电脑：Ctrl / Cmd + C、V、X，右键菜单。<br>手机 / 平板：长按选中文字、长按粘贴、输入法粘贴</span></div>
-        <div class="ban-item"><b>⑤ 声音</b><span>环境声音超过 <b>50 dB</b>（相对声级）并持续约 0.5 秒会被<b>记录并上报教师端</b>（不影响继续答题，不会因此交卷）。需授权麦克风，未授权则不监测并如实标注</span></div>
+        <div class="ban-item"><b>① 退出界面</b><span>电脑：切换标签页、最小化、切到其他窗口或程序。<br>手机 / 平板：切到其他 App、退到后台、锁屏。<br><b>第 1 次警告，第 2 次立即交卷</b></span></div>
+        <div class="ban-item"><b>② 分屏</b><span>电脑：退出全屏、把窗口缩到半屏。<br>手机 / 平板：分屏、悬浮窗导致可视区域明显变矮。<br><b>第 1 次警告，第 2 次立即交卷</b></span></div>
+        <div class="ban-item"><b>③ 复制粘贴</b><span>电脑：Ctrl / Cmd + C、V、X，右键菜单。<br>手机 / 平板：长按选中文字、长按粘贴、输入法粘贴。<br><b>一经发现立即交卷</b></span></div>
+        <div class="ban-item"><b>④ 声音</b><span>环境声音超过 <b>50 dB</b>（相对声级）并持续约 <b>1.5 秒</b>即弹出<b>警告</b>，并记录上报教师端；<b>不会因此交卷</b>。需授权麦克风，未授权则不监测并如实标注</span></div>
+        <div class="ban-item"><b>⑤ 截屏</b><span>电脑：按下截屏键（PrintScreen）会被记录并交卷</span></div>
       </div>
       <p class="hint mob-hint">手机 / 平板同样受管控：切 App、分屏悬浮窗、长按复制粘贴都会被检测；
         系统截图无法被网页检测，以水印追溯代替。</p>
@@ -91,7 +91,6 @@
 
 <!-- ============ 答题页 ============ -->
 <section class="screen" id="screen-exam">
-  <div class="wm" id="watermark" aria-hidden="true"></div>
   <div class="wrap">
     <div class="exam-top">
       <div class="row">
@@ -172,6 +171,15 @@
       <button class="btn btn-ghost" id="modal-cancel">取消</button>
       <button class="btn btn-primary" id="modal-ok">确定</button>
     </div>
+  </div>
+</div>
+
+<div class="warning-mask" id="warning-mask" hidden>
+  <div class="warning-card">
+    <div class="warn-icon">!</div>
+    <h3 id="warning-title">警告</h3>
+    <p id="warning-text"></p>
+    <button class="btn btn-primary" id="warning-ok">我知道了，继续答题</button>
   </div>
 </div>
 

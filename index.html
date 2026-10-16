@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>综合考核系统 · 军事技能训练 / 学生手册 / 安全知识</title>
+<meta name="description" content="军事技能训练理论、学生手册、安全知识三库随机抽题考核系统：自动判分、错题回溯、随机不重复组卷。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127891;</text></svg>">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<!-- ============ 首页 ============ -->
+<section class="screen active" id="screen-start">
+  <div class="wrap">
+    <div class="hero">
+      <div class="eyebrow">Military · Handbook · Safety</div>
+      <h1>综合考核系统</h1>
+      <p>军事技能训练理论 · 学生手册 · 安全知识　|　随机组卷 · 自动判分 · 错题回溯</p>
+    </div>
+
+    <div class="grid-cards" id="start-stats"></div>
+
+    <div class="rules">
+      <h2>抽题规则</h2>
+      <ul id="start-rules"></ul>
+      <h2>考试说明</h2>
+      <ul>
+        <li>全卷共 <b>40</b> 题，每题 <b>2.5</b> 分，满分 <b>100</b> 分。</li>
+        <li>每道题自动标注「单选 / 多选」标识，并标出来源题库。</li>
+        <li>单选题仅 1 个正确答案；多选题有多个正确答案，<b>少选、多选、错选均不得分</b>。</li>
+        <li>交卷后自动判分并立即显示最终得分，未作答的题目按答错计分。</li>
+        <li>交卷后自动生成错题回溯，完整展示题目、全部选项、你的答案和标准答案。</li>
+        <li>每次进入或点击「重新抽题」都会重新随机组卷，同一份试卷内不会出现重复题目。</li>
+        <li>答题中支持键盘操作：<b>A~H / 1~8</b> 选项，<b>← →</b> 翻页。</li>
+      </ul>
+    </div>
+
+    <div class="start-bar">
+      <span class="hint">题目顺序</span>
+      <div class="seg" id="order-seg">
+        <button data-mode="random" class="on">随机混合</button>
+        <button data-mode="grouped">按题库分组</button>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn btn-primary" id="btn-start">开始答题</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 答题页 ============ -->
+<section class="screen" id="screen-exam">
+  <div class="wrap">
+    <div class="exam-top">
+      <div class="row">
+        <span class="title">综合考核</span>
+        <span class="pill" id="pill-progress">已答 <b>0</b>/40</span>
+        <span class="pill" id="pill-timer">用时 00:00</span>
+        <div class="spacer"></div>
+        <button class="btn btn-ghost" id="btn-abort">退出</button>
+        <button class="btn btn-primary" id="btn-submit-top">交卷</button>
+      </div>
+      <div class="bar"><i id="bar-fill"></i></div>
+    </div>
+
+    <div class="exam-layout">
+      <div><div class="qcard" id="qcard"></div></div>
+      <aside class="sheet">
+        <h3>答 题 卡</h3>
+        <div class="cards" id="cards"></div>
+        <div class="legend">
+          <span><i style="background:var(--brand-soft);border:1px solid #c3cffa"></i>已作答</span>
+          <span><i style="background:#fff;border:1px solid var(--line-2)"></i>未作答</span>
+        </div>
+        <button class="btn btn-primary" id="btn-submit" style="width:100%;margin-top:14px">交卷并判分</button>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 结果页 ============ -->
+<section class="screen" id="screen-result">
+  <div class="wrap">
+    <div class="result-head">
+      <div class="ring" id="ring"></div>
+      <div>
+        <h2 class="verdict" id="verdict"></h2>
+        <p class="verdict-sub" id="verdict-sub"></p>
+        <div class="score-grid" id="score-grid"></div>
+      </div>
+    </div>
+
+    <div class="sec-title">
+      <h2>错题回溯</h2>
+      <span class="hint" id="review-count"></span>
+      <div class="spacer"></div>
+      <div class="seg" id="filter-seg">
+        <button data-f="wrong" class="on">只看错题</button>
+        <button data-f="all">全部题目</button>
+      </div>
+    </div>
+    <div id="review-list"></div>
+
+    <div class="footer-actions">
+      <button class="btn btn-primary" id="btn-again">重新抽题</button>
+      <button class="btn btn-ghost" id="btn-home">返回首页</button>
+      <button class="btn btn-ghost" id="btn-print">打印 / 导出成绩单</button>
+    </div>
+  </div>
+</section>
+
+<div class="modal-mask" id="modal-mask">
+  <div class="modal">
+    <h3 id="modal-title">提示</h3>
+    <p id="modal-text"></p>
+    <div class="acts">
+      <button class="btn btn-ghost" id="modal-cancel">取消</button>
+      <button class="btn btn-primary" id="modal-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="assets/banks.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>

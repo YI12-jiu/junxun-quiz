@@ -1,0 +1,15 @@
+# 操作系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# 中间产物
+tools/raw/

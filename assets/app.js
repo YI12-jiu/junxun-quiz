@@ -5,17 +5,14 @@
 (function () {
   'use strict';
 
-  /* ---------- 抽题规则（恢复为最初的规则） ---------- */
-  /* 全卷 40 题：安全知识 4 题（单选/多选不限）+ 军事技能训练理论 23 题（其中多选 6）
-     + 学生手册 13 题（其中多选 4）；每题 2.5 分，满分 100 分。
-     填空题已按要求下线 —— assets/banks_fill.js 与判分代码仍保留，
-     需要重新启用时在下面加回 { bank: 'zib', fill: 10, ... } 并在 index.html 引入该文件即可。 */
+  /* ---------- 抽题规则 ---------- */
+  /* 全卷 50 题：单选 30 + 多选 20；每题 2 分，满分 100 分。
+     抽取方式：把三个题库合并成一个池子后**纯随机抽**，不按题库分配名额 ——
+     军事技能训练理论题库最大（320 题），因此自然抽到最多；三个库也都必然有题。 */
   var RULES = [
-    { bank: 'saf', fill: 0, multi: 0, single: 0,  any: 4 },  // 安全知识：4 题，题型不限
-    { bank: 'mil', fill: 0, multi: 6, single: 17, any: 0 },  // 军事技能训练理论：23 题，其中多选 6
-    { bank: 'stu', fill: 0, multi: 4, single: 9,  any: 0 },  // 学生手册：13 题，其中多选 4
+    { banks: ['mil', 'stu', 'saf'], fill: 0, multi: 20, single: 30, any: 0 },
   ];
-  var PER_SCORE  = 2.5;                        // 每题 2.5 分
+  var PER_SCORE  = 2;                          // 每题 2 分（50 题 × 2 = 100）
   var FULL_SCORE = 100;                        // 满分 100 分
   var PASS_SCORE = 60;                         // 及格线
   var LIMIT_SEC  = 60 * 60;                    // 单次考核限时：1 小时
@@ -24,6 +21,15 @@
   }, 0); // 40
   var BANK_META  = window.BANK_META || {};
   var BANKS      = window.BANKS || {};
+
+  /* 参与组卷的题库顺序（去重），结果页与成绩单按这个顺序列分题库得分 */
+  var BANK_ORDER = (function () {
+    var out = [];
+    RULES.forEach(function (r) {
+      (r.banks || [r.bank]).forEach(function (b) { if (out.indexOf(b) < 0) out.push(b); });
+    });
+    return out;
+  })();
 
   /* 违规类型：一经触发立刻交卷，同时上报云端供教师端标红报警 */
   var VIOLATIONS = {
@@ -165,18 +171,27 @@
   });
 
   /* ---------- 组卷 ---------- */
+  /* 把若干题库合并成一个抽题池；每题记住自己来自哪个库，便于结果页按库拆分得分 */
+  function mergedPool(banks) {
+    var out = [];
+    banks.forEach(function (b) {
+      (BANKS[b] || []).forEach(function (q) { out.push({ bank: b, q: q }); });
+    });
+    return out;
+  }
+
   function buildPaper(mode) {
     var paper = [];
     RULES.forEach(function (rule) {
-      var pool    = BANKS[rule.bank] || [];
-      var fills   = pool.filter(function (x) { return x.t === 'F'; });
-      var multis  = pool.filter(function (x) { return x.t === 'M'; });
-      var singles = pool.filter(function (x) { return x.t !== 'M' && x.t !== 'F'; });
+      var banks   = rule.banks || [rule.bank];
+      var pool    = mergedPool(banks);
+      var fills   = pool.filter(function (x) { return x.q.t === 'F'; });
+      var multis  = pool.filter(function (x) { return x.q.t === 'M'; });
+      var singles = pool.filter(function (x) { return x.q.t !== 'M' && x.q.t !== 'F'; });
 
       var picked = [];
-      if (rule.any) {                                  // 题型不限：从该库全部题目里随机抽
-        var rest = pool.filter(function (x) { return x.t !== 'F'; });
-        picked = picked.concat(shuffle(rest.slice()).slice(0, Math.min(rule.any, rest.length)));
+      if (rule.any) {                                  // 题型不限：从合并池里随机抽
+        picked = picked.concat(shuffle(pool.slice()).slice(0, Math.min(rule.any, pool.length)));
       }
       if (rule.fill)   picked = picked.concat(shuffle(fills.slice()).slice(0, Math.min(rule.fill, fills.length)));
       if (rule.multi)  picked = picked.concat(shuffle(multis.slice()).slice(0, Math.min(rule.multi, multis.length)));
@@ -184,13 +199,12 @@
 
       var want = (rule.any || 0) + rule.fill + rule.multi + rule.single;
       if (picked.length !== want) {
-        throw new Error('题库题量不足：「' + ((BANK_META[rule.bank] || {}).name || rule.bank) +
-          '」需要 ' + want + ' 题（题型不限 ' + (rule.any || 0) + ' / 填空 ' + rule.fill +
-          ' / 多选 ' + rule.multi + ' / 单选 ' + rule.single +
-          '），实际只抽到 ' + picked.length + ' 题；该库现有填空 ' + fills.length +
+        throw new Error('题库题量不足：需要 ' + want + ' 题（题型不限 ' + (rule.any || 0) +
+          ' / 填空 ' + rule.fill + ' / 多选 ' + rule.multi + ' / 单选 ' + rule.single +
+          '），实际只抽到 ' + picked.length + ' 题；可用题库现有填空 ' + fills.length +
           ' 题、多选 ' + multis.length + ' 题、单选 ' + singles.length + ' 题。');
       }
-      shuffle(picked).forEach(function (q) { paper.push(makeItem(rule.bank, q)); });
+      shuffle(picked).forEach(function (x) { paper.push(makeItem(x.bank, x.q)); });
     });
 
     if (mode === 'grouped') {
@@ -264,7 +278,11 @@
 
   /* ---------- 首页 ---------- */
   function renderStart() {
-    var bankTotal = RULES.reduce(function (n, r) { return n + (BANKS[r.bank] || []).length; }, 0);
+    var usedBanks = [];
+    RULES.forEach(function (r) {
+      (r.banks || [r.bank]).forEach(function (b) { if (usedBanks.indexOf(b) < 0) usedBanks.push(b); });
+    });
+    var bankTotal = usedBanks.reduce(function (n, b) { return n + (BANKS[b] || []).length; }, 0);
     var comp = RULES.reduce(function (a, r) {
       a.fill += r.fill; a.multi += r.multi; a.single += r.single; a.any += (r.any || 0); return a;
     }, { fill: 0, multi: 0, single: 0, any: 0 });
@@ -286,8 +304,9 @@
     }).join('');
 
     var rows = RULES.map(function (r) {
-      var m = BANK_META[r.bank] || { name: r.bank };
-      var pool = BANKS[r.bank] || [];
+      var banks = r.banks || [r.bank];
+      var names = banks.map(function (b) { return (BANK_META[b] || {}).name || b; });
+      var pool = mergedPool(banks).map(function (x) { return x.q; });
       var cnt = function (t) { return pool.filter(function (x) { return x.t === t; }).length; };
       var parts = [];
       if (r.fill)   parts.push('填空 <b>' + r.fill + '</b> 题');
@@ -300,8 +319,11 @@
       if (cnt('F')) typ.push('填空 ' + cnt('F'));
       if (cnt('M')) typ.push('多选 ' + cnt('M'));
       if (singleN) typ.push('单选 ' + singleN);
-      return '<li><b>' + esc(m.name) + '</b>：随机抽 ' + parts.join(' + ') +
-        '（共 ' + tot + ' 题）　<span class="hint">（题库 ' + pool.length +
+      var who = names.length > 1
+        ? '『' + names.join(' / ') + '』（共 ' + names.length + ' 个题库合并）'
+        : '『' + names[0] + '』';
+      return '<li><b>随机抽题</b>：不按题库分配名额，从 ' + esc(who) + '的合并题库中随机抽 ' +
+        parts.join(' + ') + '（共 ' + tot + ' 题）　<span class="hint">（可选 ' + pool.length +
         ' 题：' + typ.join(' / ') + '）</span></li>';
     }).join('');
     $('start-rules').innerHTML = rows;
@@ -520,7 +542,37 @@
 
   var uploadBusy = false;
 
-  function submitUpload(silent) {
+  function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+  /* 上传重试：网络抖动或被平台限流时按指数退避自动重试。
+     权限类错误（口令/策略拒绝）不重试，避免无意义地反复打服务器。 */
+  function uploadWithRetry(payload, maxTries) {
+    maxTries = maxTries || 3;
+    var attempt = 0;
+    function tryOnce() {
+      attempt++;
+      return insertRecord(payload).then(function () {
+        return true;
+      }).catch(function (err) {
+        var code = String((err && err.code) || '');
+        var msg = String((err && err.message) || '');
+        var fatal = code.indexOf('42501') > -1 || msg.indexOf('cloud-sdk-unavailable') > -1;
+        if (fatal || attempt >= maxTries) throw err;
+        var wait = Math.min(8000, 800 * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 600);
+        uploadState = {
+          status: 'busy', msg: '正在上传成绩…',
+          sub: '服务器繁忙，' + (wait / 1000).toFixed(1) + ' 秒后自动重试（第 ' + attempt + ' 次）',
+        };
+        renderUpload();
+        return sleep(wait).then(tryOnce);
+      });
+    }
+    return tryOnce();
+  }
+
+  /* spreadMs：随机错峰窗口。大量考生同时交卷时用它把写入摊开，
+     避免同一秒的集中写入触发平台限流。 */
+  function submitUpload(silent, spreadMs) {
     if (uploadBusy) return;
     if (!CC) return;
     uploadBusy = true;
@@ -530,7 +582,11 @@
       uploadState = { status: 'busy', msg: '正在上传成绩…', sub: '' };
       renderUpload();
     }
-    insertRecord(payload).then(function () {
+    var jitter = spreadMs ? Math.floor(Math.random() * spreadMs) : 0;
+
+    sleep(jitter).then(function () {
+      return uploadWithRetry(payload, 3);
+    }).then(function () {
       dropPending(k);
       return flushPending();
     }).then(function (extra) {
@@ -543,10 +599,11 @@
       var code = String((err && err.code) || '');
       var msg = String((err && err.message) || '');
       var why = code.indexOf('42501') > -1 ? '服务端拒绝了写入'
-        : (msg.indexOf('cloud-sdk-unavailable') > -1 ? '云服务组件未加载，请检查网络后刷新页面' : '网络异常或服务暂时不可用');
+        : (msg.indexOf('cloud-sdk-unavailable') > -1 ? '云服务组件未加载，请检查网络后刷新页面'
+          : '网络或服务器繁忙（已自动重试 3 次）');
       uploadState = {
         status: 'err', msg: '成绩上传失败',
-        sub: why + '；已在本机暂存，可点击「重试上传」，不影响本次得分与成绩单下载。',
+        sub: why + '；成绩已在本机暂存，可点击「重试上传」，不影响本次得分与成绩单下载。',
       };
     }).then(function () {
       uploadBusy = false;
@@ -1099,7 +1156,9 @@
 
     renderResult();
     show('result');
-    submitUpload(false);          // 交卷即上传（违规记录同样立即上报，教师端随即报警）
+    // 交卷即上传。违规要尽快送达教师端（错峰窗口小）；超时自动交卷是大面积同时发生，
+    // 用较大的随机错峰把写入摊开，避免同一秒的集中写入触发平台限流。
+    submitUpload(false, S.violation ? 800 : (S.timedOut ? 8000 : 1200));
   }
 
   /* ---------- 违规提示 ---------- */
@@ -1185,7 +1244,7 @@
   /* 分题库得分表 */
   function renderBankTable() {
     var byBank = S.result.byBank;
-    var order = RULES.map(function (r) { return r.bank; });
+    var order = BANK_ORDER;
     var rows = '', tRight = 0, tWrong = 0, tScore = 0;
     order.forEach(function (key) {
       var b = byBank[key];
@@ -1310,7 +1369,8 @@
     var h = [];
 
     h.push('<h1>综合考核成绩单</h1>');
-    h.push('<p class="sub">军事技能训练理论 · 学生手册 · 安全知识　　全卷 40 题，每题 2.5 分，满分 100 分</p>');
+    h.push('<p class="sub">军事技能训练理论 · 学生手册 · 安全知识　　全卷 ' + TOTAL_Q +
+      ' 题，每题 ' + PER_SCORE + ' 分，满分 ' + FULL_SCORE + ' 分</p>');
 
     h.push('<table>');
     h.push('<tr><td class="k">姓　　名</td><td class="v">' + esc(e.name) +
@@ -1336,10 +1396,10 @@
     h.push('<h2>二、分题库得分</h2>');
     h.push('<table><tr><th>来源题库</th><th>抽题数</th><th>答对</th><th>答错</th><th>得分</th></tr>');
     var tR = 0, tW = 0, tS = 0;
-    RULES.forEach(function (rule) {
-      var b = R.byBank[rule.bank];
+    BANK_ORDER.forEach(function (key) {
+      var b = R.byBank[key];
       if (!b) return;
-      var meta = BANK_META[rule.bank] || { name: rule.bank };
+      var meta = BANK_META[key] || { name: key };
       var s = b.right * PER_SCORE;
       tR += b.right; tW += b.wrong; tS += s;
       h.push('<tr><td>' + esc(meta.name) + '</td><td>' + b.total + '</td><td>' + b.right +

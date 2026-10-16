@@ -10,7 +10,7 @@
   var LS_KEY = 'quiz.teacherkey';
   var LS_WHO = 'quiz.teacherwho';
   var LOGIN_RPC = (CC && CC.teacherLoginRpc) || 'teacher_login';
-  var FULL_SCORE = 100, PASS_SCORE = 60, TOTAL_Q = 40, PER_SCORE = 2.5;
+  var FULL_SCORE = 100, PASS_SCORE = 60, TOTAL_Q = 50, PER_SCORE = 2;
   var AUTO_MS = 15000;                 // 看板自动刷新间隔（有违规报警，刷新更勤）
 
   /* 违规类型：与 app.js 的 VIOLATIONS 保持一致 */

@@ -484,6 +484,8 @@
     }).join('');
     $('start-rules').innerHTML = rows;
     renderPracticeBtn();
+    renderHello();
+    renderBankCards();
 
     // 恢复上次填写的考生信息
     var saved = lsGet(LS_ID, null);
@@ -867,6 +869,10 @@
     var btn = $('btn-login');
     if (btn) { btn.disabled = false; btn.textContent = '登录并进入'; }
     show('start');
+    switchPane('home');
+    renderHello();
+    renderBankCards();
+    renderPracticeBtn();
     if (isFirst) toast('首次登录，已为您登记：' + lg.name + '（' + lg.sid + '）');
   }
 
@@ -1077,6 +1083,213 @@
       Promise.resolve(p).catch(function () { return fallback; }),
       new Promise(function (r) { setTimeout(function () { r(fallback); }, ms); }),
     ]);
+  }
+
+  /* ============================================================
+     首页页签（首页 / 错题本 / 统计）
+     ============================================================ */
+  function switchPane(name) {
+    Array.prototype.forEach.call(document.querySelectorAll('.nav-btn'), function (b) {
+      b.classList.toggle('on', b.dataset.pane === name);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.pane'), function (p) {
+      p.classList.toggle('on', p.id === 'pane-' + name);
+    });
+    window.scrollTo({ top: 0, behavior: 'auto' });
+    if (name === 'wrong') renderWrongPane();
+    if (name === 'stat') renderStatPane();
+  }
+
+  /* 各题库的题量统计 */
+  function bankStat(key) {
+    var banks = key === 'all' ? RULES[0].banks : [key];
+    var single = 0, multi = 0;
+    banks.forEach(function (b) {
+      (BANKS[b] || []).forEach(function (q) {
+        if (q.t === 'M') multi++; else if (q.t !== 'F') single++;
+      });
+    });
+    return { single: single, multi: multi, total: single + multi };
+  }
+
+  /* 已刷题数（该题库中出现在「已做过」集合里的题数） */
+  function bankDone(key, seen) {
+    var banks = key === 'all' ? RULES[0].banks : [key];
+    var n = 0;
+    banks.forEach(function (b) {
+      (BANKS[b] || []).forEach(function (q) { if (seen[qid(b, q)]) n++; });
+    });
+    return n;
+  }
+
+  function bankCardHtml(key, title, seen) {
+    var st = bankStat(key);
+    var done = bankDone(key, seen);
+    var pct = st.total ? Math.round(done / st.total * 100) : 0;
+    return '<button class="bank-card" data-bank="' + key + '">' +
+      '<b>' + esc(title) + '</b>' +
+      '<div class="bc-meta">单选 ' + st.single + ' · 多选 ' + st.multi + ' · 共 ' +
+        st.total + ' 题 　|　 <span class="bc-done">已刷 ' + done + '</span></div>' +
+      '<div class="bc-bar"><i class="bc-fill" style="width:' + pct + '%"></i></div>' +
+      '</button>';
+  }
+
+  /* 问候条：姓名 / 学号 / 班级 */
+  function renderHello() {
+    var lg = getLogin();
+    var el = $('hello-name');
+    if (el) el.textContent = lg ? (lg.name || '同学') : '同学';
+    var sub = $('hello-sub');
+    if (sub) {
+      var cls = ($('in-class') || {}).value || '';
+      var parts = [];
+      if (lg && lg.sid) parts.push('学号 ' + lg.sid);
+      if (cls) parts.push(cls);
+      var n = lg ? wrongCount(lg.sid) : 0;
+      parts.push(n ? ('错题 ' + n + ' 题') : '暂无错题');
+      sub.textContent = parts.join(' · ');
+    }
+  }
+
+  function renderBankCards() {
+    var el = $('bank-grid');
+    if (!el) return;
+    var lg = getLogin();
+    var seen = lg ? loadSeen(lg.sid) : {};
+    var html = bankCardHtml('all', '全部混刷', seen);
+    RULES[0].banks.forEach(function (b) {
+      html += bankCardHtml(b, (BANK_META[b] || {}).name || b, seen);
+    });
+    el.innerHTML = html;
+    Array.prototype.forEach.call(el.querySelectorAll('.bank-card'), function (c) {
+      c.addEventListener('click', function () { beginBankPractice(c.dataset.bank); });
+    });
+  }
+
+  /* 错题本页 */
+  function renderWrongPane() {
+    var lg = getLogin();
+    var book = lg ? loadWrong(lg.sid) : [];
+    var hint = $('wrong-head-hint');
+    if (hint) hint.textContent = book.length ? ('共 ' + book.length + ' 题') : '';
+    var list = $('wrong-list');
+    if (!list) return;
+    if (!book.length) {
+      list.innerHTML = '<div class="wrong-empty">还没有错题。完成一次考核后，答错的题会自动收录到这里。</div>';
+      var bp0 = $('btn-practice'); if (bp0) bp0.disabled = true;
+      return;
+    }
+    var bp = $('btn-practice'); if (bp) { bp.disabled = false; bp.textContent = '开始练习错题（' + book.length + ' 题）'; }
+    list.innerHTML = book.map(function (w, i) {
+      var bankName = (BANK_META[w.bank] || {}).name || w.bank;
+      var yourAns = (w.lastPicked && w.lastPicked.length) ? w.lastPicked.join('') : '未作答';
+      return '<div class="wrong-item">' +
+        '<div class="wq">' + (i + 1) + '. ' + esc(w.stem) + '</div>' +
+        '<div class="wmeta">' +
+          '<span class="bk">' + esc(bankName) + ' · ' + (w.type === 'M' ? '多选' : '单选') + '</span>' +
+          '<span class="no">你的答案：' + esc(yourAns) + '</span>' +
+          '<span class="ok">正确答案：' + esc(w.answer.join('')) + '</span>' +
+          '<span class="cnt">错 ' + (w.wrongCount || 1) + ' 次</span>' +
+        '</div></div>';
+    }).join('');
+  }
+
+  /* 统计页 */
+  function renderStatPane() {
+    var lg = getLogin();
+    var sid = lg ? lg.sid : '';
+    var seen = sid ? loadSeen(sid) : {};
+    var book = sid ? loadWrong(sid) : [];
+    var recs = lsGet(LS_REC, []).filter(function (r) { return !sid || r.sid === sid; });
+
+    var total = 0;
+    RULES[0].banks.forEach(function (b) { total += (BANKS[b] || []).filter(function (q) { return q.t !== 'F'; }).length; });
+    var done = bankDone('all', seen);
+
+    var sum = 0, pass = 0;
+    recs.forEach(function (r) { sum += Number(r.score) || 0; if ((Number(r.score) || 0) >= PASS_SCORE) pass++; });
+    var avg = recs.length ? (sum / recs.length) : 0;
+    var rate = recs.length ? Math.round(pass / recs.length * 100) : 0;
+
+    var cards = $('stat-cards');
+    if (cards) {
+      cards.innerHTML = [
+        ['已刷题数', done + '<em> / ' + total + '</em>'],
+        ['题库进度', (total ? Math.round(done / total * 100) : 0) + '<em> %</em>'],
+        ['考核次数', recs.length + '<em> 次</em>'],
+        ['平均分', (recs.length ? avg.toFixed(1) : '—') + '<em> 分</em>'],
+        ['及格率', recs.length ? rate + '<em> %</em>' : '—'],
+        ['错题数', book.length + '<em> 题</em>'],
+      ].map(function (x) {
+        return '<div class="stat-card"><div class="k">' + esc(x[0]) + '</div><div class="v">' + x[1] + '</div></div>';
+      }).join('');
+    }
+
+    var sb = $('stat-banks');
+    if (sb) {
+      var h = bankCardHtml('all', '全部题库', seen);
+      RULES[0].banks.forEach(function (b) { h += bankCardHtml(b, (BANK_META[b] || {}).name || b, seen); });
+      sb.innerHTML = h;
+      Array.prototype.forEach.call(sb.querySelectorAll('.bank-card'), function (c) {
+        c.addEventListener('click', function () { beginBankPractice(c.dataset.bank); });
+      });
+    }
+
+    var top = $('stat-top');
+    if (top) {
+      var sorted = book.slice().sort(function (a, b) { return (b.wrongCount || 1) - (a.wrongCount || 1); }).slice(0, 10);
+      if (!sorted.length) {
+        top.innerHTML = '<div class="wrong-empty">暂无错题。</div>';
+      } else {
+        top.innerHTML = sorted.map(function (w, i) {
+          var bankName = (BANK_META[w.bank] || {}).name || w.bank;
+          return '<div class="wrong-item">' +
+            '<div class="wq">' + (i + 1) + '. ' + esc(w.stem) + '</div>' +
+            '<div class="wmeta"><span class="bk">' + esc(bankName) + '</span>' +
+            '<span class="cnt">错 ' + (w.wrongCount || 1) + ' 次</span>' +
+            '<span class="ok">正确答案：' + esc(w.answer.join('')) + '</span></div></div>';
+        }).join('');
+      }
+    }
+  }
+
+  /* ---------- 题库练习 ---------- */
+  var PRACTICE_SIZE = 50;
+  function startPractice(paper, label) {
+    S.practice = true;
+    S.paper = paper;
+    S.idx = 0; S.graded = false; S.filter = 'wrong';
+    S.startAt = Date.now(); S.elapsed = 0; S.finishedAt = '';
+    S.violation = null; S.timedOut = false; S.wrongLeft = 0;
+    uploadState = { status: 'idle', msg: '', sub: '' };
+    $('pill-who').textContent = S.examinee.name + ' · ' + label + '（' + paper.length + ' 题）';
+    $('btn-submit').disabled = false;
+    $('btn-submit-top').disabled = false;
+    startTimer();
+    show('exam');
+    renderExam();
+    ensureSdk();
+  }
+
+  function beginBankPractice(key) {
+    var lg = getLogin();
+    if (!lg) { toast('请先登录'); return; }
+    S.examinee = { sid: lg.sid, name: lg.name, cls: ($('in-class') || {}).value || '' };
+    var banks = key === 'all' ? RULES[0].banks : [key];
+    var seen = loadSeen(lg.sid);
+    var pool = [];
+    banks.forEach(function (b) {
+      (BANKS[b] || []).forEach(function (q) { if (q.t !== 'F') pool.push({ bank: b, q: q }); });
+    });
+    if (!pool.length) { toast('该题库暂无题目'); return; }
+    var fresh = pool.filter(function (x) { return !seen[qid(x.bank, x.q)]; });
+    // 优先刷没做过的；没做过的不足一套时，把剩下的全部出出来（刷完这一轮）
+    var use = fresh.length >= PRACTICE_SIZE ? fresh : (fresh.length ? fresh : pool);
+    var picked = shuffle(use.slice()).slice(0, Math.min(PRACTICE_SIZE, use.length));
+    var paper = picked.map(function (x) { return makeItem(x.bank, x.q); });
+    shuffle(paper);
+    var title = key === 'all' ? '全部混刷' : ((BANK_META[key] || {}).name || key);
+    startPractice(paper, '练习 · ' + title);
   }
 
   /* ---------- 错题库清单 ---------- */
@@ -1815,8 +2028,35 @@
   });
   if ($('btn-logout')) $('btn-logout').addEventListener('click', doLogout);
 
+  /* 顶部导航与功能卡 */
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pane]'), function (b) {
+    if (b.classList.contains('nav-btn') || b.classList.contains('tool')) {
+      b.addEventListener('click', function () { switchPane(b.dataset.pane); });
+    }
+  });
+  if ($('tool-star')) {
+    $('tool-star').addEventListener('click', function () {
+      toast('标星收藏即将上线：可以先在错题本里刷错题');
+      switchPane('wrong');
+    });
+  }
+  if ($('tool-check')) {
+    $('tool-check').addEventListener('click', function () {
+      var bad = 0, total = 0, dups = 0, seenQ = {};
+      RULES[0].banks.forEach(function (b) {
+        (BANKS[b] || []).forEach(function (q) {
+          total++;
+          if (!q.q || !q.o || !q.a || !q.a.length) bad++;
+          var k = b + '|' + q.q;
+          if (seenQ[k]) dups++; else seenQ[k] = 1;
+        });
+      });
+      toast('题库自检：共 ' + total + ' 题，字段异常 ' + bad + ' 题，重复题干 ' + dups + ' 题');
+    });
+  }
+
   $('btn-start').addEventListener('click', beginExam);
-  if ($('btn-practice')) $('btn-practice').addEventListener('click', openWrongBook);
+  if ($('btn-practice')) $('btn-practice').addEventListener('click', beginWrongPractice);
   if ($('wrong-close')) $('wrong-close').addEventListener('click', closeWrongBook);
   if ($('wrong-cancel')) $('wrong-cancel').addEventListener('click', closeWrongBook);
   if ($('wrong-start')) {
@@ -1854,7 +2094,14 @@
     beginExam();
     toast('已重新随机生成一套新试卷');
   });
-  $('btn-home').addEventListener('click', function () { renderHistory(); show('start'); });
+  $('btn-home').addEventListener('click', function () {
+    renderHistory();
+    show('start');
+    switchPane('home');
+    renderHello();
+    renderBankCards();
+    renderPracticeBtn();
+  });
   $('btn-print').addEventListener('click', function () { window.print(); });
 
   $('filter-seg').addEventListener('click', function (e) {

@@ -33,80 +33,101 @@
 </section>
 
 <section class="screen" id="screen-start">
+  <nav class="topnav">
+    <button class="nav-btn on" data-pane="home">首页</button>
+    <button class="nav-btn" data-pane="wrong">错题本</button>
+    <button class="nav-btn" data-pane="stat">统计</button>
+  </nav>
+
   <div class="wrap">
-    <div class="hero">
-      <div class="eyebrow">Military · Handbook · Safety</div>
-      <h1>综合考核系统</h1>
-      <p>军事技能训练理论 · 学生手册 · 安全知识　|　随机组卷 · 自动判分 · 错题回溯</p>
-    </div>
 
-    <div class="grid-cards" id="start-stats"></div>
-
-    <div class="rules" id="idcard">
-      <h2>考生信息（考核前必填）</h2>
-      <div class="idform">
-        <label class="field">
-          <span>姓　名</span>
-          <input id="in-name" type="text" maxlength="20" placeholder="请输入真实姓名" autocomplete="name">
-        </label>
-        <label class="field">
-          <span>班　级</span>
-          <input id="in-class" type="text" maxlength="30" placeholder="如：计算机 2301 班">
-        </label>
-        <label class="field">
-          <span>学　号</span>
-          <input id="in-id" type="text" maxlength="24" placeholder="请输入学号" autocomplete="off">
-        </label>
+    <!-- ============ 首页 ============ -->
+    <div class="pane on" id="pane-home">
+      <div class="hello">
+        <div>
+          <div class="hello-hi">你好，<b id="hello-name">同学</b></div>
+          <div class="hello-sub" id="hello-sub"></div>
+        </div>
+        <button class="btn-mini logout" id="btn-logout" type="button">退出登录</button>
       </div>
-      <button class="btn-mini logout" id="btn-logout" type="button">退出登录</button>
-      <p class="hint" id="id-hint">姓名、班级、学号会写入考核成绩单，请核对无误后开始答题。</p>
+
+      <div class="card exam-card">
+        <div class="card-head">
+          <h2>正式考核</h2>
+          <span class="badge-soft">50 题 · 35 分钟 · 满分 100</span>
+        </div>
+        <div class="idform">
+          <label class="field"><span>姓　名</span>
+            <input id="in-name" type="text" maxlength="20" placeholder="请输入真实姓名" autocomplete="name"></label>
+          <label class="field"><span>班　级</span>
+            <input id="in-class" type="text" maxlength="30" placeholder="如：计算机 2301 班"></label>
+          <label class="field"><span>学　号</span>
+            <input id="in-id" type="text" maxlength="24" placeholder="请输入学号" autocomplete="off"></label>
+        </div>
+        <p class="hint" id="id-hint">姓名、班级、学号会写入考核成绩单，请核对无误后开始答题。</p>
+
+        <details class="fold">
+          <summary>查看考试须知与抽题规则</summary>
+          <ul>
+            <li><b>限时 35 分钟</b>：倒计时归零后系统自动交卷，未作答的题目按答错计分。</li>
+            <li>点击「开始答题」后将<b>自动进入全屏</b>，减少答题时的干扰；中途可随时退出全屏。</li>
+            <li>全卷 50 题（单选 30 + 多选 20），每题 2 分，满分 100 分，<b>60 分及格</b>。</li>
+            <li>多选题<b>少选、多选、错选均不得分</b>；未作答的题目按答错计分。</li>
+            <li>考试期间检测<b>分屏</b>与<b>截屏</b>：<b>前 3 次警告，第 4 次自动交卷</b>。</li>
+            <li>每套试卷按题库比例固定抽取：军事 28 · 学生手册 11 · 安全 11，题目顺序随机打乱。</li>
+            <li>系统会记录你已做过的题，<b>刷完一轮题库之前不会重复出题</b>。</li>
+          </ul>
+        </details>
+
+        <label class="agree">
+          <input type="checkbox" id="agree-rules">
+          <span>我已阅读并同意遵守以上考试须知。</span>
+        </label>
+        <p class="hint err" id="agree-msg" hidden>请先勾选「我已阅读并同意」再开始答题。</p>
+
+        <button class="btn btn-primary big" id="btn-start">开始答题</button>
+      </div>
+
+      <h3 class="sec-h">选择题库开始练习</h3>
+      <div class="bank-grid" id="bank-grid"></div>
+
+      <div class="tool-grid">
+        <button class="tool" id="tool-star"><b>标星收藏</b><span>只刷我标星的题</span></button>
+        <button class="tool" data-pane="stat"><b>进度统计</b><span>正确率与错题排行</span></button>
+        <button class="tool" id="tool-check"><b>题库自检</b><span>核对收录是否完整</span></button>
+      </div>
+
+      <div class="grid-cards" id="start-stats"></div>
+      <div id="history-box" hidden></div>
+      <ul class="rules-list" id="start-rules" hidden></ul>
     </div>
 
-    <div class="rules guard-rules">
-      <h2>考试须知（请务必阅读）</h2>
-      <ul>
-        <li><b>限时 35 分钟</b>：倒计时归零后系统自动交卷，未作答的题目按答错计分。</li>
-        <li>点击「开始答题」后将<b>自动进入全屏</b>，减少答题时的干扰；中途可随时退出全屏。</li>
-        <li>全卷 50 题（单选 30 + 多选 20），每题 2 分，满分 100 分，<b>60 分及格</b>。</li>
-        <li>多选题<b>少选、多选、错选均不得分</b>；未作答的题目按答错计分。</li>
-        <li>答题过程中可随时修改答案，以交卷时的选择为准。</li>
-        <li>考试期间检测<b>分屏</b>与<b>截屏</b>：<b>前 3 次警告，第 4 次自动交卷</b>（同时记录并上报教师端）。</li>
-      </ul>
-      <label class="agree">
-        <input type="checkbox" id="agree-rules">
-        <span>我已阅读并同意遵守以上考试须知。</span>
-      </label>
-      <p class="hint err" id="agree-msg" hidden>请先勾选「我已阅读并同意」再开始答题。</p>
+    <!-- ============ 错题本 ============ -->
+    <div class="pane" id="pane-wrong">
+      <div class="pane-head">
+        <h2>错题本</h2>
+        <span class="hint" id="wrong-head-hint"></span>
+      </div>
+      <p class="hint">答错自动收录，答对自动移出。错题库按学号保存在本机浏览器。</p>
+      <div class="wrong-list inline" id="wrong-list"></div>
+      <div class="pane-acts">
+        <button class="btn btn-primary" id="btn-practice">开始练习错题</button>
+      </div>
     </div>
 
-    <div class="rules">
-      <h2>抽题规则</h2>
-      <ul id="start-rules"></ul>
-      <h2>考试说明</h2>
-      <ul>
-        <li>全卷共 <b>50</b> 题（单选 <b>30</b> · 多选 <b>20</b>），每题 <b>2</b> 分，满分 <b>100</b> 分，限时 <b>35</b> 分钟。</li>
-        <li>每道题自动标注「单选 / 多选」标识，并标出来源题库。</li>
-        <li>单选题仅 1 个正确答案；多选题有多个正确答案，<b>少选、多选、错选均不得分</b>。</li>
-        <li>交卷后自动判分并立即显示最终得分，未作答的题目按答错计分。</li>
-        <li>交卷后自动生成错题回溯，完整展示题目、全部选项、你的答案和标准答案。</li>
-        <li>每次进入或点击「重新抽题」都会重新随机组卷，同一份试卷内不会出现重复题目。</li>
-        <li>答题中支持键盘操作：按 <b>A~H / 1~8</b> 选择选项，<b>← →</b> 翻页。</li>
-      </ul>
+    <!-- ============ 统计 ============ -->
+    <div class="pane" id="pane-stat">
+      <div class="pane-head"><h2>进度统计</h2></div>
+      <div class="stat-cards" id="stat-cards"></div>
+      <h3 class="sec-h">各题库进度</h3>
+      <div class="bank-grid" id="stat-banks"></div>
+      <h3 class="sec-h">错题排行（错得最多的）</h3>
+      <div class="wrong-list inline" id="stat-top"></div>
     </div>
 
-    <div class="start-bar">
-      <span class="hint">题目顺序：随机混合（每次组卷都会重新打乱，不会按题库分组）</span>
-      <div class="spacer"></div>
-      <a class="btn btn-ghost" href="teacher.html">教师端成绩汇总</a>
-      <button class="btn btn-primary" id="btn-start">开始答题</button>
-      <button class="btn btn-ghost" id="btn-practice" hidden>错题练习（）</button>
-    </div>
-
-    <div id="history-box" hidden></div>
   </div>
 </section>
 
-<!-- ============ 答题页 ============ -->
 <section class="screen" id="screen-exam">
   <div class="wrap">
     <div class="exam-top">
@@ -187,21 +208,6 @@
     <div class="acts">
       <button class="btn btn-ghost" id="modal-cancel">取消</button>
       <button class="btn btn-primary" id="modal-ok">确定</button>
-    </div>
-  </div>
-</div>
-
-<div class="wrong-mask" id="wrong-mask" hidden>
-  <div class="wrong-card">
-    <div class="wrong-head">
-      <h3>我的错题库 <span class="wrong-n" id="wrong-n"></span></h3>
-      <button class="wrong-x" id="wrong-close" aria-label="关闭">×</button>
-    </div>
-    <p class="wrong-tip">答对即自动移出错题库；错题库按学号保存在本机浏览器。</p>
-    <div class="wrong-list" id="wrong-list"></div>
-    <div class="wrong-acts">
-      <button class="btn btn-primary" id="wrong-start">开始练习</button>
-      <button class="btn btn-ghost" id="wrong-cancel">关闭</button>
     </div>
   </div>
 </div>

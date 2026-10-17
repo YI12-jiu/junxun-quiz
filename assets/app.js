@@ -7,8 +7,8 @@
 
   /* ---------- 抽题规则 ---------- */
   /* 全卷 50 题：单选 30 + 多选 20；每题 2 分，满分 100 分。
-     抽取方式：把三个题库合并成一个池子后**纯随机抽**，不按题库分配名额 ——
-     军事技能训练理论题库最大（320 题），因此自然抽到最多；三个库也都必然有题。 */
+     抽取方式：**按题库题量比例分配名额**（比例不变），并保证三个题库都有题；
+     同时按学号记录「已做过的题」，**刷完一轮之前优先抽没做过的题**。 */
   var RULES = [
     { banks: ['mil', 'stu', 'saf'], fill: 0, multi: 20, single: 30, any: 0 },
   ];
@@ -20,6 +20,9 @@
   var TOTAL_Q    = RULES.reduce(function (n, r) {
     return n + (r.any || 0) + r.fill + r.multi + r.single;
   }, 0); // 40
+  /* 实际题数：正式考核固定 50 题，错题练习则按错题数量 */
+  function qTotal() { return (S.paper && S.paper.length) ? S.paper.length : TOTAL_Q; }
+
   var BANK_META  = window.BANK_META || {};
   var BANKS      = window.BANKS || {};
 
@@ -62,9 +65,10 @@
 
   /* 违规类型：一经触发立刻交卷，同时上报云端供教师端标红报警 */
   var VIOLATIONS = {
-    leave: '退出考试界面',
-    split: '分屏 / 调整窗口',
-    copy:  '复制粘贴',
+    leave:      '退出考试界面',      // 已下线，仅用于显示历史记录
+    split:      '分屏 / 调整窗口',
+    copy:       '复制粘贴',          // 已下线，仅用于显示历史记录
+    screenshot: '截屏',
   };
 
   /* ---------- 工具 ---------- */
@@ -207,34 +211,137 @@
     return out;
   }
 
-  function buildPaper() {
+  /* ---------- 题目唯一标识 ---------- */
+  /* 用「题库 + 题干哈希」作为题目指纹，用于记录考生已经做过哪些题。 */
+  function qhash(str) {
+    var h = 5381;
+    for (var i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+  function qid(bank, q) { return bank + ':' + qhash(String(q.q)); }
+
+  /* ---------- 「已做过的题」按学号持久化 ---------- */
+  /* 存在本机（localStorage）；换设备或清缓存会重新计算一轮。 */
+  var LS_SEEN = 'quiz.seen.';
+  function loadSeen(sid) {
+    var list = lsGet(LS_SEEN + sid, []);
+    var set = {};
+    (list || []).forEach(function (x) { set[x] = 1; });
+    return set;
+  }
+  function saveSeen(sid, set) {
+    var arr = Object.keys(set);
+    if (arr.length > 4000) arr = arr.slice(arr.length - 4000);
+    lsSet(LS_SEEN + sid, arr);
+  }
+
+  /* ---------- 错题库（按学号） ---------- */
+  var LS_WRONG = 'quiz.wrong.';
+  var WRONG_CAP = 300;                        // 错题库上限，避免 localStorage 过大
+  function loadWrong(sid) {
+    var list = lsGet(LS_WRONG + sid, []);
+    return Array.isArray(list) ? list.filter(Boolean) : [];
+  }
+  function saveWrong(sid, list) { lsSet(LS_WRONG + sid, list.slice(0, WRONG_CAP)); }
+  function wrongCount(sid) { return sid ? loadWrong(sid).length : 0; }
+
+  /* 交卷时更新错题库：答错的收录并累加次数，答对的移出（说明已掌握） */
+  function updateWrongBook(items) {
+    var sid = S.examinee && S.examinee.sid;
+    if (!sid) return 0;
+    var book = loadWrong(sid);
+    var idx = {};
+    book.forEach(function (x, i) { idx[x.id] = i; });
+    items.forEach(function (rec) {
+      var it = rec.item;
+      if (!it || !it.id) return;
+      if (rec.ok) {
+        if (idx[it.id] != null) { book[idx[it.id]] = null; }
+      } else {
+        var prev = (idx[it.id] != null && book[idx[it.id]]) ? book[idx[it.id]] : null;
+        var target = {
+          id: it.id, bank: it.bank, type: it.type,
+          stem: it.stem, options: it.options, answer: it.answer.slice(),
+          lastPicked: it.picked ? it.picked.slice() : [],
+          wrongCount: (prev ? prev.wrongCount : 0) + 1,
+          lastAt: fmtDate(),
+        };
+        if (prev) book[idx[it.id]] = target;
+        else { book.push(target); idx[it.id] = book.length - 1; }
+      }
+    });
+    saveWrong(sid, book.filter(Boolean));
+    return wrongCount(sid);
+  }
+
+  /* ---------- 按题库题量比例分配名额（最大余数法） ---------- */
+  /* 保证：① 每个题库都有题；② 各库占比稳定 = 该库题量占总量之比。 */
+  function bankQuota(type, total, banks) {
+    var sizes = banks.map(function (b) {
+      var n = (BANKS[b] || []).filter(function (q) {
+        return type === 'M' ? q.t === 'M' : (q.t !== 'M' && q.t !== 'F');
+      }).length;
+      return { bank: b, n: n };
+    });
+    var sum = sizes.reduce(function (a, x) { return a + x.n; }, 0) || 1;
+    var raw = sizes.map(function (x) {
+      var exact = total * x.n / sum;
+      return { bank: x.bank, n: x.n, base: Math.floor(exact), frac: exact - Math.floor(exact) };
+    });
+    var assigned = raw.reduce(function (a, x) { return a + x.base; }, 0);
+    var order = raw.slice().sort(function (a, b) { return b.frac - a.frac; });
+    for (var i = 0; assigned < total && i < order.length * 2; i++) {
+      var t = order[i % order.length];
+      if (t.base < t.n) { t.base++; assigned++; }
+    }
+    var out = {};
+    raw.forEach(function (x) { out[x.bank] = Math.min(x.base, x.n); });
+    return out;
+  }
+
+  /* 组卷：按题库配额抽题，优先抽「没做过的题」；
+     若某题型没做过的已不够一套，则这一轮视为刷完，清空记录重新开始。 */
+  function buildPaper(seen) {
     var paper = [];
-    RULES.forEach(function (rule) {
-      var banks   = rule.banks || [rule.bank];
-      var pool    = mergedPool(banks);
-      var fills   = pool.filter(function (x) { return x.q.t === 'F'; });
-      var multis  = pool.filter(function (x) { return x.q.t === 'M'; });
-      var singles = pool.filter(function (x) { return x.q.t !== 'M' && x.q.t !== 'F'; });
+    var banks = RULES[0].banks;
+    var needS = RULES[0].single, needM = RULES[0].multi;
 
-      var picked = [];
-      if (rule.any) {                                  // 题型不限：从合并池里随机抽
-        picked = picked.concat(shuffle(pool.slice()).slice(0, Math.min(rule.any, pool.length)));
-      }
-      if (rule.fill)   picked = picked.concat(shuffle(fills.slice()).slice(0, Math.min(rule.fill, fills.length)));
-      if (rule.multi)  picked = picked.concat(shuffle(multis.slice()).slice(0, Math.min(rule.multi, multis.length)));
-      if (rule.single) picked = picked.concat(shuffle(singles.slice()).slice(0, Math.min(rule.single, singles.length)));
+    var freshS = 0, freshM = 0;
+    banks.forEach(function (b) {
+      (BANKS[b] || []).forEach(function (q) {
+        if (seen[qid(b, q)]) return;
+        if (q.t === 'M') freshM++;
+        else if (q.t !== 'F') freshS++;
+      });
+    });
+    if (freshS < needS || freshM < needM) {
+      Object.keys(seen).forEach(function (k) { delete seen[k]; });
+      S.roundWrapped = true;
+    }
 
-      var want = (rule.any || 0) + rule.fill + rule.multi + rule.single;
-      if (picked.length !== want) {
-        throw new Error('题库题量不足：需要 ' + want + ' 题（题型不限 ' + (rule.any || 0) +
-          ' / 填空 ' + rule.fill + ' / 多选 ' + rule.multi + ' / 单选 ' + rule.single +
-          '），实际只抽到 ' + picked.length + ' 题；可用题库现有填空 ' + fills.length +
-          ' 题、多选 ' + multis.length + ' 题、单选 ' + singles.length + ' 题。');
-      }
-      shuffle(picked).forEach(function (x) { paper.push(makeItem(x.bank, x.q)); });
+    [['S', needS], ['M', needM]].forEach(function (pair) {
+      var type = pair[0], total = pair[1];
+      var quota = bankQuota(type, total, banks);
+      Object.keys(quota).forEach(function (bank) {
+        var want = quota[bank];
+        if (!want) return;
+        var pool = (BANKS[bank] || []).filter(function (q) {
+          return type === 'M' ? q.t === 'M' : (q.t !== 'M' && q.t !== 'F');
+        });
+        var fresh = [], used = [];
+        pool.forEach(function (q) { (seen[qid(bank, q)] ? used : fresh).push(q); });
+        var picked = shuffle(fresh.slice()).slice(0, Math.min(want, fresh.length));
+        if (picked.length < want) {
+          picked = picked.concat(shuffle(used.slice()).slice(0, Math.min(want - picked.length, used.length)));
+        }
+        picked.forEach(function (q) { paper.push(makeItem(bank, q)); });
+      });
     });
 
-    // 题目顺序固定为随机混合（不再提供「按题库分组」，避免同类题目扎堆）
+    if (paper.length !== needS + needM) {
+      throw new Error('题库题量不足：需要 ' + (needS + needM) + ' 题，实际组出 ' + paper.length + ' 题。');
+    }
+
     shuffle(paper);
     return paper;
   }
@@ -251,6 +358,7 @@
       };
     }
     return {
+      id: qid(bank, q),      // 题目指纹，用于「已做过」与错题库
       bank: bank,
       type: q.t === 'M' ? 'M' : 'S',
       stem: q.q,
@@ -266,13 +374,16 @@
 
   var lastSig = '';
   function newPaper() {
+    var sid = (S.examinee && S.examinee.sid) || '';
+    var seen = loadSeen(sid);
     var paper, sig, tries = 0;
     do {
-      paper = buildPaper();
+      paper = buildPaper(seen);
       sig = signature(paper);
       tries++;
     } while (sig === lastSig && tries < 8);
     lastSig = sig;
+    S.seen = seen;                 // 交卷时把本卷题目并入
     return paper;
   }
 
@@ -292,6 +403,9 @@
     filter: 'wrong',
     result: null,
     finishedAt: '',
+    seen: {},                 // 该学号已做过的题目指纹
+    roundWrapped: false,      // 本次组卷是否刚开启新一轮
+    strikes: {},              // 违规计数：{ split: n, screenshot: n }
     violation: null,          // { code, detail, at }
     timedOut: false,          // 是否因超时自动交卷
     warned: 0,                // 已提示过的剩余时间档位
@@ -299,6 +413,20 @@
   };
 
   /* ---------- 首页 ---------- */
+  /* 首页的「错题练习」按钮：按当前填写的学号显示错题数量 */
+  function renderPracticeBtn() {
+    var btn = $('btn-practice');
+    if (!btn) return;
+    var id = readIdentity();
+    var n = (id && id.sid) ? wrongCount(id.sid) : 0;
+    if (n > 0) {
+      btn.hidden = false;
+      btn.textContent = '错题练习（' + n + ' 题）';
+    } else {
+      btn.hidden = true;
+    }
+  }
+
   function renderStart() {
     if (!banksReady) {
       $('start-stats').innerHTML = '<div class="stat"><div class="k">正在准备</div>' +
@@ -355,6 +483,7 @@
         ' 题：' + typ.join(' / ') + '）</span></li>';
     }).join('');
     $('start-rules').innerHTML = rows;
+    renderPracticeBtn();
 
     // 恢复上次填写的考生信息
     var saved = lsGet(LS_ID, null);
@@ -626,7 +755,7 @@
     }
     var jitter = spreadMs ? Math.floor(Math.random() * spreadMs) : 0;
 
-    sleep(jitter).then(function () {
+    (jitter > 0 ? sleep(jitter) : Promise.resolve()).then(function () {
       return uploadWithRetry(payload, 3);
     }).then(function () {
       dropPending(k);
@@ -664,20 +793,184 @@
   }
 
   /* ============================================================
-     考场检测规则：已按需求全部下线
-     （原「退出界面 / 分屏 / 复制粘贴」检测、警告弹窗、管控状态条均已移除）
-     只保留全屏请求，用于减少答题干扰，不再做任何行为判定。
+     考场检测规则（按需求仅保留：分屏 / 截图）
+     · 分屏：桌面看「窗口宽度占屏幕比例」、小屏看「可视高度占屏幕比例」，
+             持续 1.5 秒即判定（输入法弹出等场景有宽限，避免误判）
+     · 截图：捕获 PrintScreen 按键
+     · 两者均为「前 3 次警告、第 4 次立即交卷」
+     （退出界面、复制粘贴、声音、人脸检测均已下线）
      ============================================================ */
+  var GUARD = {
+    armed: false, fired: false,
+    suppressUntil: 0,        // 开考缓冲：这段时间内失焦/尺寸变化不算违规
+    fsOk: false,
+    splitSince: 0,           // 桌面端分屏计时
+    msplitSince: 0,          // 小屏分屏计时（必须与上面分开，否则互相清零）
+    strikeGraceUntil: 0,     // 警告后的宽限截止时间
+    watchTimer: null,
+  };
+  var SPLIT_MIN_SCREEN  = 1100;   // 屏幕窄于此值改走「可视高度」规则
+  var SPLIT_RATIO       = 0.85;   // 桌面：窗口宽度 < 屏幕 85%
+  var MOBILE_SPLIT_RATIO = 0.6;   // 小屏：可视高度 < 屏幕 60%
+  var TYPING_GRACE = 2500;        // 刚碰过输入框后的宽限（输入法会压矮视口）
+  var lastTypingAt = 0;
+
+  /* 前 3 次警告、第 4 次交卷：n < limit 时才警告 */
+  var STAGED_LIMIT = { split: 4, screenshot: 4 };
+  var STRIKE_GRACE = 3000;
+
+  function isSmallScreen() {
+    var sw = (window.screen &&
+      Math.max(window.screen.availWidth || 0, window.screen.width || 0)) || 0;
+    return sw > 0 && sw < SPLIT_MIN_SCREEN;
+  }
+  function noteTyping() { lastTypingAt = Date.now(); }
+  function inInput(el) {
+    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
+  }
+  function suppressGuard(ms) { GUARD.suppressUntil = Date.now() + ms; }
+  function guardActive() {
+    return GUARD.armed && !GUARD.fired && !S.graded && Date.now() >= GUARD.suppressUntil;
+  }
+  function inStrikeGrace() { return Date.now() < (GUARD.strikeGraceUntil || 0); }
+
+  /* 警告弹窗：写明第几次、还剩几次机会 */
+  function warnStudent(code, detail, n, limit) {
+    var el = $('warning-mask');
+    if (!el) { toast('警告：' + (VIOLATIONS[code] || code) + '（第 ' + n + ' 次）'); return; }
+    $('warning-title').textContent = '第 ' + n + ' 次警告：' + (VIOLATIONS[code] || code);
+    var left = limit - n;
+    var tail = left > 0
+      ? '还有 <b>' + left + '</b> 次机会；再犯将自动交卷。'
+      : '<b>这是最后一次警告，下次将立即自动交卷。</b>';
+    $('warning-text').innerHTML = esc(detail) + '<br>这是第 <b>' + n + '</b> 次，' + tail;
+    el.hidden = false;
+  }
+
+  function trip(code, detail) {
+    if (!guardActive()) return false;
+    var limit = STAGED_LIMIT[code];
+    if (limit) {
+      var n = (S.strikes[code] || 0) + 1;
+      S.strikes[code] = n;
+      if (n < limit) {
+        GUARD.strikeGraceUntil = Date.now() + STRIKE_GRACE;
+        GUARD.splitSince = 0;
+        GUARD.msplitSince = 0;
+        warnStudent(code, detail, n, limit);
+        return false;
+      }
+    }
+    GUARD.fired = true;
+    S.violation = { code: code, detail: detail, at: new Date() };
+    try { grade({ violation: S.violation }); } catch (e) {}
+    showViolationMask();
+    return true;
+  }
+
+  function showViolationMask() {
+    var mask = $('violation-mask');
+    if (!mask) return;
+    var v = S.violation || {};
+    $('violation-text').innerHTML =
+      '<b>' + esc(VIOLATIONS[v.code] || v.code || '违规行为') + '</b>' +
+      (v.detail ? '：' + esc(v.detail) : '') +
+      '<br><span class="hint">系统已立即交卷，并把本次违规上报教师端（成绩单状态标记为违规）。</span>';
+    mask.hidden = false;
+  }
+
+  function armGuard() {
+    GUARD.armed = true;
+    GUARD.fired = false;
+    GUARD.splitSince = 0;
+    GUARD.msplitSince = 0;
+    GUARD.strikeGraceUntil = 0;
+    S.violation = null;
+    S.strikes = {};
+    S.timedOut = false;
+  }
+  function disarmGuard() {
+    GUARD.armed = false;
+    clearInterval(GUARD.watchTimer);
+    GUARD.watchTimer = null;
+  }
+
+  /* ---- 全屏 ---- */
   function requestExamFullscreen() {
     var el = document.documentElement;
-    if (!el.requestFullscreen) return Promise.resolve(false);
-    return Promise.resolve(el.requestFullscreen()).then(function () { return true; })
-      .catch(function () { return false; });
+    if (!el.requestFullscreen) { GUARD.fsOk = false; return Promise.resolve(false); }
+    return Promise.resolve(el.requestFullscreen()).then(function () {
+      GUARD.fsOk = true; return true;
+    }).catch(function () { GUARD.fsOk = false; return false; });
   }
   function exitExamFullscreen() {
     if (document.fullscreenElement && document.exitFullscreen) {
       try { document.exitFullscreen(); } catch (e) {}
     }
+  }
+
+  /* ---- 截图：PrintScreen ---- */
+  document.addEventListener('keydown', function (e) {
+    if (!guardActive()) return;
+    if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
+      trip('screenshot', '按下截屏键 PrintScreen');
+    }
+  }, true);
+
+  /* ---- 分屏巡检 ---- */
+  function checkSplit() {
+    if (!guardActive()) { GUARD.splitSince = 0; return; }
+    if (inStrikeGrace()) { GUARD.splitSince = 0; return; }
+    if (isSmallScreen()) { GUARD.splitSince = 0; return; }
+    var sw = (window.screen && window.screen.availWidth) || 0;
+    var w = window.outerWidth || window.innerWidth || 0;
+    if (sw < SPLIT_MIN_SCREEN || !w) { GUARD.splitSince = 0; return; }
+    if (w < sw * SPLIT_RATIO) {
+      if (!GUARD.splitSince) GUARD.splitSince = Date.now();
+      else if (Date.now() - GUARD.splitSince >= 1000) {
+        trip('split', '窗口宽度仅占屏幕的 ' + Math.round(w / sw * 100) + '%（疑似分屏）');
+      }
+    } else { GUARD.splitSince = 0; }
+  }
+  function checkMobileSplit() {
+    if (!guardActive()) { GUARD.msplitSince = 0; return; }
+    if (inStrikeGrace()) { GUARD.msplitSince = 0; return; }
+    if (!isSmallScreen()) { GUARD.msplitSince = 0; return; }
+    var sh = (window.screen && window.screen.height) || 0;
+    var ih = window.innerHeight || 0;
+    if (!sh || !ih) { GUARD.msplitSince = 0; return; }
+    if (Date.now() - lastTypingAt < TYPING_GRACE) { GUARD.msplitSince = 0; return; }
+    if (ih < sh * MOBILE_SPLIT_RATIO) {
+      if (!GUARD.msplitSince) GUARD.msplitSince = Date.now();
+      else if (Date.now() - GUARD.msplitSince >= 1000) {
+        trip('split', '可视高度仅占屏幕的 ' + Math.round(ih / sh * 100) + '%（疑似分屏或悬浮窗）');
+      }
+    } else { GUARD.msplitSince = 0; }
+  }
+  function checkAllSplit() { checkSplit(); checkMobileSplit(); }
+  window.addEventListener('resize', checkAllSplit);
+  window.addEventListener('orientationchange', function () { noteTyping(); setTimeout(checkAllSplit, 800); });
+  /* 开考即巡检一次：如果考生「一开始就处于分屏」，不必等第一次轮询就开始计时 */
+  function startGuardWatch() {
+    clearInterval(GUARD.watchTimer);
+    checkAllSplit();
+    GUARD.watchTimer = setInterval(checkAllSplit, 800);
+  }
+  ['focusin', 'focusout', 'input'].forEach(function (ev) {
+    document.addEventListener(ev, function (e) { if (inInput(e.target)) noteTyping(); }, true);
+  });
+
+  /* ---- 考场状态条 ---- */
+  function renderGuardStatus() {
+    var el = $('guard-status');
+    if (!el) return;
+    var items = [
+      [isSmallScreen() ? '分屏/悬浮窗拦截' : '全屏与分屏拦截', true],
+      ['截屏拦截', true],
+    ];
+    el.innerHTML = items.map(function (it) {
+      return '<span class="gitem on">✔ ' + esc(it[0]) + '</span>';
+    }).join('');
   }
 
   /* ---------- 开始考试 ---------- */
@@ -686,6 +979,36 @@
       Promise.resolve(p).catch(function () { return fallback; }),
       new Promise(function (r) { setTimeout(function () { r(fallback); }, ms); }),
     ]);
+  }
+
+  /* ---------- 错题练习 ---------- */
+  function beginWrongPractice() {
+    var id = readIdentity();
+    if (!id) { toast('请先填写姓名、班级、学号'); return; }
+    S.examinee = id;
+    lsSet(LS_ID, id);
+    var book = loadWrong(id.sid);
+    if (!book.length) { toast('错题库还是空的，先完成一次考核吧'); return; }
+
+    S.practice = true;
+    S.paper = book.map(function (w) {
+      return {
+        id: w.id, bank: w.bank, type: w.type, stem: w.stem,
+        options: w.options, answer: w.answer.slice(), picked: [],
+      };
+    });
+    shuffle(S.paper);
+    S.idx = 0; S.graded = false; S.filter = 'wrong';
+    S.startAt = Date.now(); S.elapsed = 0; S.finishedAt = '';
+    S.violation = null; S.timedOut = false; S.wrongLeft = 0;
+    uploadState = { status: 'idle', msg: '', sub: '' };
+    $('pill-who').textContent = id.name + ' · 错题练习（' + S.paper.length + ' 题）';
+    $('btn-submit').disabled = false;
+    $('btn-submit-top').disabled = false;
+    startTimer();
+    show('exam');
+    renderExam();
+    ensureSdk();
   }
 
   function beginExam() {
@@ -724,10 +1047,13 @@
     var btn = $('btn-start');
     btn.disabled = true;
     btn.textContent = '正在准备考场…';
+    suppressGuard(20000);                  // 全屏授权期间的尺寸变化不算违规
     requestExamFullscreen().then(function () {
       btn.disabled = false;
       btn.textContent = '开始答题';
       startExam();
+      startGuardWatch();
+      suppressGuard(700);                  // 仅留 0.7 秒给全屏切换，避免「开考就分屏」被漏检
     }).catch(function () {
       btn.disabled = false;
       btn.textContent = '开始答题';
@@ -751,9 +1077,13 @@
     uploadState = { status: 'idle', msg: '', sub: '' };
     renderUpload();
     $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
+    armGuard();                   // 启用分屏 / 截图检测
     startTimer();
     show('exam');
     renderExam();
+    renderGuardStatus();
+    if ($('violation-mask')) $('violation-mask').hidden = true;
+    if ($('warning-mask')) $('warning-mask').hidden = true;
     ensureSdk();                  // 后台静默拉取云 SDK，等 35 分钟后交卷时早已就绪
   }
 
@@ -764,6 +1094,13 @@
 
   function startTimer() {
     clearInterval(S.timer);
+    if (S.practice) {                       // 错题练习不限时、不自动交卷
+      var p0 = $('pill-timer');
+      if (p0) { p0.className = 'pill'; p0.innerHTML = '<b>错题练习</b>'; }
+      var b0 = $('time-banner');
+      if (b0) b0.hidden = true;
+      return;
+    }
     updateTimer();
     S.timer = setInterval(function () {
       updateTimer();
@@ -833,7 +1170,7 @@
 
     var html = '';
     html += '<div class="qhead">';
-    html += '<span class="qno">第 ' + (S.idx + 1) + ' 题 / ' + TOTAL_Q + '</span>';
+    html += '<span class="qno">第 ' + (S.idx + 1) + ' 题 / ' + qTotal() + '</span>';
     html += '<span class="tag ' + typeCls + '">' + typeLabel + '</span>';
     html += '<span class="tag tag-bank">' + esc(meta.short) + '</span>';
     if (isFill) html += '<span class="tag tag-bank">共 ' + item.blanks.length + ' 空</span>';
@@ -863,8 +1200,8 @@
       '<span class="hint">' + (isFill ? '用鼠标或 <kbd>Tab</kbd> 在空格间切换'
         : '按 <kbd>A</kbd>~<kbd>H</kbd> 或 <kbd>1</kbd>~<kbd>8</kbd> 选择') +
       '，<kbd>←</kbd><kbd>→</kbd> 翻页</span>' +
-      '<button class="btn ' + (S.idx === TOTAL_Q - 1 ? 'btn-ghost' : 'btn-primary') + '" id="btn-next">' +
-      (S.idx === TOTAL_Q - 1 ? '最后一题' : '下一题') + '</button>' +
+      '<button class="btn ' + (S.idx === qTotal() - 1 ? 'btn-ghost' : 'btn-primary') + '" id="btn-next">' +
+      (S.idx === qTotal() - 1 ? '最后一题' : '下一题') + '</button>' +
       '</div>';
 
     $('qcard').innerHTML = html;
@@ -905,8 +1242,8 @@
 
   function renderProgress() {
     var done = S.paper.filter(isAnswered).length;
-    $('pill-progress').innerHTML = '已答 <b>' + done + '</b>/' + TOTAL_Q;
-    $('bar-fill').style.width = (done / TOTAL_Q * 100) + '%';
+    $('pill-progress').innerHTML = '已答 <b>' + done + '</b>/' + qTotal();
+    $('bar-fill').style.width = (done / qTotal() * 100) + '%';
   }
 
   $('cards').addEventListener('click', function (e) {
@@ -928,7 +1265,7 @@
   }
 
   function go(i) {
-    if (i < 0 || i >= TOTAL_Q) return;
+    if (i < 0 || i >= qTotal()) return;
     S.idx = i;
     renderExam();
   }
@@ -953,6 +1290,7 @@
     if (S.graded) return;
     opts = opts || {};
     stopTimer();
+    disarmGuard();
     exitExamFullscreen();
     S.elapsed = Math.floor((Date.now() - S.startAt) / 1000);
     if (S.elapsed > LIMIT_SEC) S.elapsed = LIMIT_SEC;
@@ -974,17 +1312,26 @@
       if (ok) b.right++; else b.wrong++;
     });
 
+    if (!S.practice) {
+      // 记录「已做过」：本卷全部题目并入该学号的已做集合
+      var sid = S.examinee.sid;
+      var seen = S.seen || {};
+      S.paper.forEach(function (it) { if (it.id) seen[it.id] = 1; });
+      saveSeen(sid, seen);
+    }
+    S.wrongLeft = updateWrongBook(items);     // 错题库：答错收录、答对移出
+
     var score = right * PER_SCORE;
     S.result = {
       score: score, right: right, wrong: wrong, blank: blank,
       items: items, byBank: byBank,
     };
 
-    saveRecord({
+    if (!S.practice) saveRecord({
       time: S.finishedAt,
       name: S.examinee.name, cls: S.examinee.cls, sid: S.examinee.sid,
       score: Math.round(score * 100) / 100, right: right, wrong: wrong, blank: blank,
-      used: fmtTime(S.elapsed), rate: Math.round(right / TOTAL_Q * 100) + '%',
+      used: fmtTime(S.elapsed), rate: Math.round(right / qTotal() * 100) + '%',
       violation: S.violation ? S.violation.code : '',
       timeout: !!S.timedOut,
     });
@@ -997,7 +1344,7 @@
     //   冲突交卷：个案 → 0.8 秒；正常交卷：学生陆续完成 → 4 秒；
     //   超时交卷：**所有人同时到点**，是最集中的写入峰值 → 放宽到 60 秒，
     //            1000 人时约 17 条/秒，远低于平台限流阈值；晚 1 分钟上传不影响成绩。
-    submitUpload(false, S.violation ? 800 : (S.timedOut ? 60000 : 4000));
+    if (!S.practice) submitUpload(false, S.violation ? 800 : (S.timedOut ? 60000 : 4000));
   }
 
   /* ---------- 渲染结果页 ---------- */
@@ -1060,7 +1407,7 @@
       '<div class="s ok"><b>' + R.right + '</b><span>答对</span></div>' +
       '<div class="s bad"><b>' + R.wrong + '</b><span>答错</span></div>' +
       '<div class="s"><b>' + R.blank + '</b><span>未作答</span></div>' +
-      '<div class="s"><b>' + (R.right / TOTAL_Q * 100).toFixed(0) + '%</b><span>正确率</span></div>';
+      '<div class="s"><b>' + (R.right / qTotal() * 100).toFixed(0) + '%</b><span>正确率</span></div>';
 
     renderBankTable();
 
@@ -1210,7 +1557,7 @@
     h.push('<h2>一、成绩汇总</h2>');
     h.push('<table><tr><th>最终得分</th><th>试卷满分</th><th>答对</th><th>答错</th><th>未作答</th><th>正确率</th></tr>');
     h.push('<tr><td>' + score + '</td><td>100</td><td>' + R.right + '</td><td>' + R.wrong +
-      '</td><td>' + R.blank + '</td><td>' + (R.right / TOTAL_Q * 100).toFixed(0) + '%</td></tr></table>');
+      '</td><td>' + R.blank + '</td><td>' + (R.right / qTotal() * 100).toFixed(0) + '%</td></tr></table>');
     h.push('<p class="note">考核限时 ' + LIMIT_MIN + ' 分钟，实际用时 ' + fmtTime(S.elapsed) + '。' +
       (S.violation
         ? '<b>考核状态：违规（' + esc(VIOLATIONS[S.violation.code] || S.violation.code) + '）</b>，系统已立即交卷。'
@@ -1324,10 +1671,23 @@
   });
 
   /* ---------- 按钮绑定 ---------- */
+  if ($('warning-ok')) {
+    $('warning-ok').addEventListener('click', function () { $('warning-mask').hidden = true; });
+  }
+  if ($('violation-ok')) {
+    $('violation-ok').addEventListener('click', function () { $('violation-mask').hidden = true; });
+  }
+
   $('btn-start').addEventListener('click', beginExam);
+  if ($('btn-practice')) $('btn-practice').addEventListener('click', beginWrongPractice);
   $('btn-submit').addEventListener('click', submit);
   $('btn-submit-top').addEventListener('click', submit);
   $('btn-doc').addEventListener('click', downloadDoc);
+
+  ['in-name', 'in-class', 'in-id'].forEach(function (id) {
+    var el = $(id);
+    if (el) el.addEventListener('input', function () { renderPracticeBtn(); });
+  });
 
   if ($('agree-rules')) {
     $('agree-rules').addEventListener('change', function () {

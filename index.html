@@ -44,18 +44,14 @@
       <h2>考试须知（请务必阅读）</h2>
       <ul>
         <li><b>限时 35 分钟</b>：倒计时归零后系统自动交卷，未作答的题目按答错计分。</li>
-        <li>点击「开始答题」后将<b>自动进入全屏</b>，并<b>申请麦克风权限</b>用于监测环境声音。</li>
-        <li>考试期间以下行为会被实时检测，<b>一经触发立即交卷</b>，同时记录违规、上报教师端，并在该次考核名单中<b>标红</b>：</li>
+        <li>点击「开始答题」后将<b>自动进入全屏</b>，减少答题时的干扰；中途可随时退出全屏。</li>
+        <li>全卷 50 题（单选 30 + 多选 20），每题 2 分，满分 100 分，<b>60 分及格</b>。</li>
+        <li>多选题<b>少选、多选、错选均不得分</b>；未作答的题目按答错计分。</li>
+        <li>答题过程中可随时修改答案，以交卷时的选择为准。</li>
       </ul>
-      <div class="ban-grid">
-        <div class="ban-item"><b>① 退出界面</b><span>电脑：切换标签页、最小化、切到其他窗口或程序。<br>手机 / 平板：切到其他 App、退到后台、锁屏。<br><b>前 3 次警告，第 4 次立即交卷</b></span></div>
-        <div class="ban-item"><b>② 分屏</b><span>电脑：退出全屏、把窗口缩到半屏。<br>手机 / 平板：分屏、悬浮窗导致可视区域明显变矮。<br><b>前 3 次警告，第 4 次立即交卷</b></span></div>
-        <div class="ban-item"><b>③ 复制粘贴</b><span>电脑：Ctrl / Cmd + C、V、X，右键菜单。<br>手机 / 平板：长按选中文字、长按粘贴、输入法粘贴。<br><b>前 3 次警告，第 4 次立即交卷</b></span></div>
-      </div>
-      <p class="hint mob-hint">手机 / 平板同样受管控：切 App、分屏 / 悬浮窗、长按复制粘贴都会被检测。</p>
       <label class="agree">
         <input type="checkbox" id="agree-rules">
-        <span>我已阅读并同意遵守以上考试纪律，理解违规将导致本次考核立即结束并被记录。</span>
+        <span>我已阅读并同意遵守以上考试须知。</span>
       </label>
       <p class="hint err" id="agree-msg" hidden>请先勾选「我已阅读并同意」再开始答题。</p>
     </div>
@@ -100,7 +96,6 @@
         <button class="btn btn-primary" id="btn-submit-top">交卷</button>
       </div>
       <div class="bar"><i id="bar-fill"></i></div>
-      <div class="guard-bar" id="guard-status"></div>
       <div class="time-banner" id="time-banner" hidden></div>
     </div>
 
@@ -168,24 +163,6 @@
       <button class="btn btn-ghost" id="modal-cancel">取消</button>
       <button class="btn btn-primary" id="modal-ok">确定</button>
     </div>
-  </div>
-</div>
-
-<div class="warning-mask" id="warning-mask" hidden>
-  <div class="warning-card">
-    <div class="warn-icon">!</div>
-    <h3 id="warning-title">警告</h3>
-    <p id="warning-text"></p>
-    <button class="btn btn-primary" id="warning-ok">我知道了，继续答题</button>
-  </div>
-</div>
-
-<div class="violation-mask" id="violation-mask" hidden>
-  <div class="violation-card">
-    <div class="vio-icon">!</div>
-    <h3>检测到违规行为，已立即交卷</h3>
-    <p id="violation-text"></p>
-    <button class="btn btn-primary" id="violation-ok">我知道了</button>
   </div>
 </div>
 

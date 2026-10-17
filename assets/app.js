@@ -293,7 +293,6 @@
     result: null,
     finishedAt: '',
     violation: null,          // { code, detail, at }
-    strikes: {},              // 「首次警告、再次交卷」的计数：{ leave: n, split: n }
     timedOut: false,          // 是否因超时自动交卷
     warned: 0,                // 已提示过的剩余时间档位
     focusFill: false,
@@ -665,238 +664,20 @@
   }
 
   /* ============================================================
-     考场行为管控
-     三类违规：退出界面 / 分屏 / 复制粘贴
-     任一触发 → 立即交卷 + 结果页醒目提示 + 成绩随记录上报云端（教师端标红报警）
+     考场检测规则：已按需求全部下线
+     （原「退出界面 / 分屏 / 复制粘贴」检测、警告弹窗、管控状态条均已移除）
+     只保留全屏请求，用于减少答题干扰，不再做任何行为判定。
      ============================================================ */
-  var GUARD = {
-    armed: false,          // 是否处于管控中（进入考试后开启）
-    fired: false,          // 本次考核是否已触发违规
-    suppressUntil: 0,      // 抑制窗口：全屏/授权弹窗自身造成的失焦不算违规
-    fsOk: false,           // 浏览器是否支持并成功进入全屏
-    strikeGraceUntil: 0,   // 警告后的宽限截止时间
-    splitSince: 0,        // 桌面端分屏（窗口宽度）计时
-    msplitSince: 0,       // 手机端分屏（可视高度）计时——必须与上面分开，否则互相清零
-    watchTimer: null,
-  };
-
-  var SPLIT_MIN_SCREEN = 1100; // 桌面端：屏幕窄于此值时不判定分屏（避免小屏误报）
-  var MOBILE_SPLIT_RATIO = 0.6;// 手机端：可视高度不足屏幕高度的 60% 视为分屏/悬浮窗
-  var TYPING_GRACE = 2500;     // 刚碰过输入框后的宽限时间（输入法弹出会缩小视口，不能算分屏）
-  var lastTypingAt = 0;
-
-  /* 手机 / 平板判定：**按屏幕尺寸判断**，不用 UA 或触摸能力 ——
-     `'ontouchstart' in window` 在很多桌面浏览器（含触屏笔记本）上也为真，
-     用它判断会让桌面端的分屏检测直接失效。小屏设备本身也没有可用的全屏 API。 */
-  function isSmallScreen() {
-    var sw = (window.screen &&
-      Math.max(window.screen.availWidth || 0, window.screen.width || 0)) || 0;
-    return sw > 0 && sw < SPLIT_MIN_SCREEN;
-  }
-  function noteTyping() { lastTypingAt = Date.now(); }
-  function inInput(el) {
-    return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true);
-  }
-
-  /* 设定抑制窗口：ms 毫秒内不判定违规。
-     注意必须「直接覆盖」而不是取最大值——开考前的准备窗口（20 秒）会被进入考试后的
-     1.5 秒缓冲覆盖掉，否则考试开始后的前 20 秒管控形同虚设。 */
-  function suppressGuard(ms) {
-    GUARD.suppressUntil = Date.now() + ms;
-  }
-  function guardActive() {
-    return GUARD.armed && !GUARD.fired && !S.graded && Date.now() >= GUARD.suppressUntil;
-  }
-
-  var STAGED_LIMIT = { leave: 4, split: 4, copy: 4 };   // 前 3 次警告（n<4），第 4 次交卷
-  var STRIKE_GRACE = 3000;   // 警告后给 3 秒宽限，让学生有机会把窗口调回来
-
-  function inStrikeGrace() { return Date.now() < (GUARD.strikeGraceUntil || 0); }
-
-  /* 警告弹窗：不交卷，只让考生明确知道「已经是第几次、还剩几次机会」 */
-  function warnStudent(code, detail, n, limit) {
-    var el = $('warning-mask');
-    if (!el) { toast('警告：' + (VIOLATIONS[code] || code) + '（第 ' + n + ' 次）'); return; }
-    $('warning-title').textContent = '第 ' + n + ' 次警告：' + (VIOLATIONS[code] || code);
-    var left = limit - n;
-    var tail = left > 0
-      ? '还有 <b>' + left + '</b> 次机会；再犯将自动交卷。'
-      : '<b>这是最后一次警告，下次将立即自动交卷。</b>';
-    $('warning-text').innerHTML = esc(detail) + '<br>这是第 <b>' + n + '</b> 次，' + tail;
-    el.hidden = false;
-  }
-
-  function trip(code, detail) {
-    if (!guardActive()) return false;
-    var limit = STAGED_LIMIT[code];
-    if (limit) {
-      var n = (S.strikes[code] || 0) + 1;
-      S.strikes[code] = n;
-      if (n < limit) {
-        GUARD.strikeGraceUntil = Date.now() + STRIKE_GRACE;
-        GUARD.splitSince = 0;
-        GUARD.msplitSince = 0;
-        warnStudent(code, detail, n, limit);
-        return false;                              // 第 1 次只警告
-      }
-    }
-    GUARD.fired = true;
-    S.violation = { code: code, detail: detail, at: new Date() };
-    try { grade({ violation: S.violation }); } catch (e) {}
-    showViolationMask();
-    return true;
-  }
-
-  function armGuard() {
-    GUARD.armed = true;
-    GUARD.fired = false;
-    GUARD.splitSince = 0;
-    GUARD.msplitSince = 0;
-    GUARD.strikeGraceUntil = 0;
-    S.violation = null;
-    S.strikes = {};
-    S.timedOut = false;
-    S.warned = 0;
-  }
-  function disarmGuard() {
-    GUARD.armed = false;
-    clearInterval(GUARD.watchTimer);
-    GUARD.watchTimer = null;
-  }
-
-  /* ---- 全屏 ---- */
   function requestExamFullscreen() {
     var el = document.documentElement;
-    if (!el.requestFullscreen) { GUARD.fsOk = false; return Promise.resolve(false); }
-    return Promise.resolve(el.requestFullscreen()).then(function () {
-      GUARD.fsOk = true;
-      return true;
-    }).catch(function () { GUARD.fsOk = false; return false; });
+    if (!el.requestFullscreen) return Promise.resolve(false);
+    return Promise.resolve(el.requestFullscreen()).then(function () { return true; })
+      .catch(function () { return false; });
   }
   function exitExamFullscreen() {
     if (document.fullscreenElement && document.exitFullscreen) {
       try { document.exitFullscreen(); } catch (e) {}
     }
-  }
-
-  /* ---- 事件监听（常驻注册，靠 guardActive() 判断是否生效） ---- */
-  document.addEventListener('visibilitychange', function () {
-    if (!guardActive()) return;
-    if (document.hidden) trip('leave', '切换到其他标签页 / 最小化了窗口');
-  });
-
-  window.addEventListener('blur', function () {
-    if (!guardActive()) return;
-    trip('leave', '考试窗口失去焦点（切到了别的窗口或程序）');
-  });
-
-  window.addEventListener('pagehide', function () {
-    if (!guardActive()) return;
-    trip('leave', '离开了考试页面');
-  });
-
-  document.addEventListener('fullscreenchange', function () {
-    if (!guardActive() || !GUARD.fsOk) return;
-    if (!document.fullscreenElement) trip('split', '退出了全屏（可能进入了分屏或调整了窗口）');
-  });
-
-  /* 复制粘贴：与前两类一样走「前 3 次警告、第 4 次交卷」 */
-  document.addEventListener('keydown', function (e) {
-    if (!guardActive()) return;
-    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
-      var k = String(e.key || '').toLowerCase();
-      if (k === 'c' || k === 'x' || k === 'v') {
-        trip('copy', '使用快捷键 ' + (e.metaKey ? 'Cmd' : 'Ctrl') + '+' + k.toUpperCase());
-      }
-    }
-  }, true);
-
-  ['copy', 'cut', 'paste'].forEach(function (ev) {
-    var label = { copy: '复制', cut: '剪切', paste: '粘贴' }[ev];
-    document.addEventListener(ev, function (e) {
-      if (!guardActive()) return;
-      trip('copy', '触发了' + label + '操作');
-    }, true);
-  });
-
-  document.addEventListener('contextmenu', function (e) {
-    if (!guardActive()) return;
-    trip('copy', '打开了右键菜单或长按菜单');
-  }, true);
-
-  document.addEventListener('selectstart', function (e) {
-    if (!guardActive()) return;
-    if (inInput(e.target)) return;
-    trip('copy', '尝试选中页面文字（移动端长按选择）');
-  }, true);
-
-  document.addEventListener('beforeinput', function (e) {
-    if (!guardActive()) return;
-    var t = String(e.inputType || '');
-    if (t.indexOf('insertFromPaste') === 0 || t === 'insertFromDrop') {
-      trip('copy', '粘贴了内容（移动端长按粘贴 / 输入法粘贴）');
-    }
-  }, true);
-
-  document.addEventListener('drop', function (e) {
-    if (!guardActive()) return;
-    trip('copy', '拖入了内容');
-  }, true);
-
-  /* 记录「正在用输入框」，供手机端分屏判定避开输入法弹出的干扰 */
-  ['focusin', 'focusout', 'input'].forEach(function (ev) {
-    document.addEventListener(ev, function (e) {
-      if (inInput(e.target)) noteTyping();
-    }, true);
-  });
-
-  /* ---- 周期性巡检：分屏 / 全屏状态 ---- */
-  function checkSplit() {
-    if (!guardActive()) { GUARD.splitSince = 0; return; }
-    if (inStrikeGrace()) { GUARD.splitSince = 0; return; }   // 刚警告过，给时间恢复
-    // 小屏设备交给下面的「可视高度」规则：手机上 outerWidth 的语义不可靠，
-    // 若照搬桌面规则可能整场考试都被误判为分屏。
-    if (isSmallScreen()) { GUARD.splitSince = 0; return; }
-    var sw = (window.screen && window.screen.availWidth) || 0;
-    var w = window.outerWidth || window.innerWidth || 0;
-    if (sw < SPLIT_MIN_SCREEN || !w) { GUARD.splitSince = 0; return; }
-    if (w < sw * 0.85) {
-      if (!GUARD.splitSince) GUARD.splitSince = Date.now();
-      else if (Date.now() - GUARD.splitSince > 1500) {
-        trip('split', '窗口宽度仅占屏幕的 ' + Math.round(w / sw * 100) + '%（疑似分屏）');
-      }
-    } else {
-      GUARD.splitSince = 0;
-    }
-  }
-
-  /* 手机 / 平板的分屏判定：这些设备没有可用的全屏 API，改看「可视高度占屏幕高度的比例」。
-     Android 分屏、悬浮窗、小窗播放都会让可视区明显变矮。
-     输入法弹出同样会压矮视口，因此刚碰过输入框的 2.5 秒内不判定。 */
-  function checkMobileSplit() {
-    if (!guardActive()) { GUARD.msplitSince = 0; return; }
-    if (inStrikeGrace()) { GUARD.msplitSince = 0; return; }  // 刚警告过，给时间恢复
-    if (!isSmallScreen()) { GUARD.msplitSince = 0; return; }
-    var sh = (window.screen && window.screen.height) || 0;
-    var ih = window.innerHeight || 0;
-    if (!sh || !ih) { GUARD.msplitSince = 0; return; }
-    if (Date.now() - lastTypingAt < TYPING_GRACE) { GUARD.msplitSince = 0; return; }
-    if (ih < sh * MOBILE_SPLIT_RATIO) {
-      if (!GUARD.msplitSince) GUARD.msplitSince = Date.now();
-      else if (Date.now() - GUARD.msplitSince > 1500) {
-        trip('split', '可视高度仅占屏幕的 ' + Math.round(ih / sh * 100) + '%（疑似分屏或悬浮窗）');
-      }
-    } else {
-      GUARD.msplitSince = 0;
-    }
-  }
-
-  function checkAllSplit() { checkSplit(); checkMobileSplit(); }
-  window.addEventListener('resize', checkAllSplit);
-  window.addEventListener('orientationchange', function () { noteTyping(); setTimeout(checkAllSplit, 800); });
-  function startGuardWatch() {
-    clearInterval(GUARD.watchTimer);
-    GUARD.watchTimer = setInterval(checkAllSplit, 1000);
   }
 
   /* ---------- 开始考试 ---------- */
@@ -943,14 +724,10 @@
     var btn = $('btn-start');
     btn.disabled = true;
     btn.textContent = '正在准备考场…';
-    suppressGuard(20000);                  // 全屏授权期间自身造成的失焦不算违规
-
     requestExamFullscreen().then(function () {
       btn.disabled = false;
       btn.textContent = '开始答题';
       startExam();
-      startGuardWatch();
-      suppressGuard(1500);                 // 进入考试后留 1.5 秒缓冲，避免首帧误判
     }).catch(function () {
       btn.disabled = false;
       btn.textContent = '开始答题';
@@ -973,11 +750,7 @@
     $('btn-submit-top').disabled = false;
     uploadState = { status: 'idle', msg: '', sub: '' };
     renderUpload();
-    $('violation-mask').hidden = true;
-    if ($('warning-mask')) $('warning-mask').hidden = true;
-    renderGuardStatus();
     $('pill-who').textContent = S.examinee.name + ' · ' + S.examinee.cls + ' · ' + S.examinee.sid;
-    armGuard();
     startTimer();
     show('exam');
     renderExam();
@@ -1024,20 +797,6 @@
     }
   }
   function stopTimer() { clearInterval(S.timer); S.timer = null; }
-
-  /* 考场状态条：说明当前哪几项管控已生效 */
-  function renderGuardStatus() {
-    var el = $('guard-status');
-    if (!el) return;
-    var items = [
-      ['退出/切屏拦截', true],
-      [isSmallScreen() ? '分屏/悬浮窗拦截' : '全屏与分屏拦截', isSmallScreen() ? true : GUARD.fsOk],
-      ['复制粘贴拦截', true],
-    ];
-    el.innerHTML = items.map(function (it) {
-      return '<span class="gitem ' + (it[1] ? 'on' : 'off') + '">' + (it[1] ? '✔' : '✖') + ' ' + esc(it[0]) + '</span>';
-    }).join('');
-  }
 
   /* ---------- 渲染答题页 ---------- */
   /* 填空题题干：把 ____ 换成行内输入框，保持句子连贯 */
@@ -1194,7 +953,6 @@
     if (S.graded) return;
     opts = opts || {};
     stopTimer();
-    disarmGuard();
     exitExamFullscreen();
     S.elapsed = Math.floor((Date.now() - S.startAt) / 1000);
     if (S.elapsed > LIMIT_SEC) S.elapsed = LIMIT_SEC;
@@ -1235,19 +993,11 @@
     show('result');
     // 交卷即上传。违规要尽快送达教师端（错峰窗口小）；超时自动交卷是大面积同时发生，
     // 用较大的随机错峰把写入摊开，避免同一秒的集中写入触发平台限流。
-    submitUpload(false, S.violation ? 800 : (S.timedOut ? 8000 : 1200));
-  }
-
-  /* ---------- 违规提示 ---------- */
-  function showViolationMask() {
-    var mask = $('violation-mask');
-    if (!mask) return;
-    var v = S.violation || {};
-    $('violation-text').innerHTML =
-      '<b>' + esc(VIOLATIONS[v.code] || v.code || '违规行为') + '</b>' +
-      (v.detail ? '：' + esc(v.detail) : '') +
-      '<br><span class="hint">系统已立即交卷，并把本次违规上报教师端（成绩单状态标记为违规）。</span>';
-    mask.hidden = false;
+    // 错峰窗口按「可能同时交卷的人数」放大：
+    //   冲突交卷：个案 → 0.8 秒；正常交卷：学生陆续完成 → 4 秒；
+    //   超时交卷：**所有人同时到点**，是最集中的写入峰值 → 放宽到 60 秒，
+    //            1000 人时约 17 条/秒，远低于平台限流阈值；晚 1 分钟上传不影响成绩。
+    submitUpload(false, S.violation ? 800 : (S.timedOut ? 60000 : 4000));
   }
 
   /* ---------- 渲染结果页 ---------- */
@@ -1552,10 +1302,6 @@
   }
 
   document.addEventListener('keydown', function (e) {
-    if ($('violation-mask') && !$('violation-mask').hidden) {
-      if (e.key === 'Escape' || e.key === 'Enter') $('violation-mask').hidden = true;
-      return;
-    }
     if ($('modal-mask').classList.contains('open')) {
       if (e.key === 'Escape') closeModal(false);
       if (e.key === 'Enter') closeModal(true);
@@ -1579,17 +1325,10 @@
 
   /* ---------- 按钮绑定 ---------- */
   $('btn-start').addEventListener('click', beginExam);
-  if ($('warning-ok')) {
-    $('warning-ok').addEventListener('click', function () { $('warning-mask').hidden = true; });
-  }
-
   $('btn-submit').addEventListener('click', submit);
   $('btn-submit-top').addEventListener('click', submit);
   $('btn-doc').addEventListener('click', downloadDoc);
 
-  if ($('violation-ok')) {
-    $('violation-ok').addEventListener('click', function () { $('violation-mask').hidden = true; });
-  }
   if ($('agree-rules')) {
     $('agree-rules').addEventListener('change', function () {
       if (this.checked && $('agree-msg')) $('agree-msg').hidden = true;

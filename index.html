@@ -235,8 +235,9 @@
 <!-- 首屏加速：只同步加载 app.js（其余两个大文件按需/后台加载）
      · banks.js 106KB：考完之后才需要，异步加载，加载完回调 __banksReady
      · 云 SDK 72KB：只在交卷上传需要，开考后在后台静默拉取 -->
-<script src="assets/cloud-config.js"></script>
-<script src="assets/app.js"></script>
-<script async src="assets/banks.js" onload="window.__banksReady&&window.__banksReady()"></script>
+<!-- ?v= 版本号：改了资源内容就改它，避免浏览器用旧缓存导致功能异常 -->
+<script src="assets/cloud-config.js?v=20261017h"></script>
+<script src="assets/app.js?v=20261017h"></script>
+<script async src="assets/banks.js?v=20261017h" onload="window.__banksReady&&window.__banksReady()"></script>
 </body>
 </html>

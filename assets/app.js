@@ -829,12 +829,26 @@
 
     btn.disabled = true;
     btn.textContent = '登录中…';
-    ensureSdk().then(function (ok) {
-      if (!ok) throw new Error('cloud-sdk-unavailable');
-      var cloud = getCloud();
-      if (!cloud || !CC || !CC.studentLoginRpc) throw new Error('cloud-sdk-unavailable');
-      return cloud.database.rpc(CC.studentLoginRpc, { p_sid: sid, p_name: name });
-    }).then(function (res) {
+
+    function attemptLogin(tries) {
+      return ensureSdk().then(function (ok) {
+        if (!ok) throw new Error('sdk-load-failed');
+        var cloud = getCloud();
+        if (!cloud) throw new Error('sdk-init-failed');
+        if (!CC || !CC.studentLoginRpc) throw new Error('stale-config');
+        return cloud.database.rpc(CC.studentLoginRpc, { p_sid: sid, p_name: name });
+      }).catch(function (err) {
+        var m = String((err && err.message) || '');
+        var code = String((err && err.code) || '');
+        // 配置缺失 / SDK 未就绪 → 几乎都是「页面是旧缓存」，直接提示刷新，不再重试
+        if (m.indexOf('stale-config') > -1 || m.indexOf('sdk-') > -1) throw err;
+        // 网络类错误：自动重试 1 次
+        if (tries < 2) return sleep(800).then(function () { return attemptLogin(tries + 1); });
+        throw err;
+      });
+    }
+
+    attemptLogin(1).then(function (res) {
       if (res && res.error) throw res.error;
       var r = Array.isArray(res.data) ? res.data[0] : res.data;
       r = r || {};
@@ -849,9 +863,16 @@
       btn.disabled = false;
       btn.textContent = '登录并进入';
       var m = String((err && err.message) || '');
-      showLoginError(m.indexOf('cloud-sdk') > -1
-        ? '网络异常，无法连接服务器，请稍后重试'
-        : '登录失败，请检查网络后重试');
+      var code = String((err && err.code) || '');
+      if (m.indexOf('stale-config') > -1 || m.indexOf('unknown function') > -1 || code.indexOf('42883') > -1) {
+        showLoginError('页面版本过旧（浏览器缓存），请按 Ctrl+F5 强制刷新后重试');
+      } else if (m.indexOf('sdk-') > -1) {
+        showLoginError('页面组件未加载完整，请按 Ctrl+F5 强制刷新后重试');
+      } else if (m.indexOf('Failed to fetch') > -1 || code.indexOf('NETWORK') > -1) {
+        showLoginError('网络连接失败，请检查网络后重试');
+      } else {
+        showLoginError('登录失败：' + (m || '请稍后重试'));
+      }
     });
   }
 

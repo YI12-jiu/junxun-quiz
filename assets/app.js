@@ -62,11 +62,9 @@
 
   /* 违规类型：一经触发立刻交卷，同时上报云端供教师端标红报警 */
   var VIOLATIONS = {
-    leave:      '退出考试界面',
-    screenshot: '截屏',
-    split:      '分屏 / 调整窗口',
-    copy:       '复制粘贴',
-    sound:      '环境声音',
+    leave: '退出考试界面',
+    split: '分屏 / 调整窗口',
+    copy:  '复制粘贴',
   };
 
   /* ---------- 工具 ---------- */
@@ -296,7 +294,6 @@
     finishedAt: '',
     violation: null,          // { code, detail, at }
     strikes: {},              // 「首次警告、再次交卷」的计数：{ leave: n, split: n }
-    face: null,               // 考前采集的人脸：{ photo: dataURL, live: bool }
     timedOut: false,          // 是否因超时自动交卷
     warned: 0,                // 已提示过的剩余时间档位
     focusFill: false,
@@ -520,9 +517,7 @@
       violation_detail: S.violation ? (S.violation.detail || '') : null,
       violated_at: S.violation ? S.violation.at.toISOString() : null,
       timed_out: !!S.timedOut,
-      sound_monitored: !!GUARD.soundOk,
-      face_photo: (S.face && S.face.photo) ? S.face.photo : null,
-      face_live: S.face ? !!S.face.live : null,
+      sound_monitored: false,
     };
   }
 
@@ -671,7 +666,7 @@
 
   /* ============================================================
      考场行为管控
-     五类违规：退出界面 / 截屏 / 分屏 / 复制粘贴 / 环境声音
+     三类违规：退出界面 / 分屏 / 复制粘贴
      任一触发 → 立即交卷 + 结果页醒目提示 + 成绩随记录上报云端（教师端标红报警）
      ============================================================ */
   var GUARD = {
@@ -679,32 +674,12 @@
     fired: false,          // 本次考核是否已触发违规
     suppressUntil: 0,      // 抑制窗口：全屏/授权弹窗自身造成的失焦不算违规
     fsOk: false,           // 浏览器是否支持并成功进入全屏
-    soundOk: false,        // 是否成功开启麦克风声音监测
-    soundHits: 0,
-    soundDb: 0,            // 当前环境声音等级（0~100 相对声级）
-    soundPeakDb: 0,        // 本次考核测到的最高等级
-    soundFloat: true,      // 是否用浮点采样（精度更高）
-    soundWarnAt: 0,        // 上次声音警告的时间（弹窗冷却用）
     strikeGraceUntil: 0,   // 警告后的宽限截止时间
-    soundTimer: null,
-    soundBuf: null,
-    audioCtx: null,
-    micStream: null,
     splitSince: 0,        // 桌面端分屏（窗口宽度）计时
     msplitSince: 0,       // 手机端分屏（可视高度）计时——必须与上面分开，否则互相清零
     watchTimer: null,
   };
 
-  /* ---------- 环境声音限值 ----------
-     浏览器测不到真实声压级（dB SPL 需要校准过的麦克风），只能测相对电平。
-     界面统一换算成 **0~100 的相对声级**（= dBFS + 100），数值越大越吵：
-       0~20 数字静音 / 30~40 很安静的房间 / 45~55 小声交谈 / 60~80 正常说话 / 85+ 大声
-       限值 50 大致对应「小声交谈」的起点
-     另：采样必须用 getFloatTimeDomainData（浮点）而不是 8 位版本 ——
-     8 位量化下「任何非静音」的底噪就有 58，限值定得低会退化成「有声音就触发」。 */
-  var SOUND_DB_LIMIT = 50;     // 限值（0~100 相对声级），超过即记录
-  var SOUND_HOLD     = 15;     // 连续超标次数（每 100ms 一次，约 1.5 秒）
-  var SOUND_FLOOR    = 0;      // 声级下限
   var SPLIT_MIN_SCREEN = 1100; // 桌面端：屏幕窄于此值时不判定分屏（避免小屏误报）
   var MOBILE_SPLIT_RATIO = 0.6;// 手机端：可视高度不足屏幕高度的 60% 视为分屏/悬浮窗
   var TYPING_GRACE = 2500;     // 刚碰过输入框后的宽限时间（输入法弹出会缩小视口，不能算分屏）
@@ -733,26 +708,6 @@
     return GUARD.armed && !GUARD.fired && !S.graded && Date.now() >= GUARD.suppressUntil;
   }
 
-  /* 声音超标：**只记录与提示，不立即交卷**。
-     仍会记入本次成绩、随交卷上报教师端并在名单中标红，只是不影响考生继续答题。 */
-  function flagSound(msg, db) {
-    var first = !S.violation;
-    if (first) {
-      S.violation = { code: 'sound', detail: msg, at: new Date(), peak: db };
-    } else if (S.violation.code === 'sound' && db > (S.violation.peak || -100)) {
-      S.violation.peak = db;
-      S.violation.detail = msg;                // 保留最响的一次描述
-    } else {
-      return;                                   // 已因其他原因被判违规，无需重复记录
-    }
-    if (first) {
-      toast('⚠ 检测到环境声音超标，已记录，交卷时会一并上报教师端');
-      renderGuardStatus();
-    }
-    renderSoundMeter();
-  }
-
-  /* 首次只警告、再次才交卷的行为（按需求：退出界面 / 分屏 各有 2 次机会） */
   var STAGED_LIMIT = { leave: 2, split: 2 };
   var STRIKE_GRACE = 3000;   // 警告后给 3 秒宽限，让学生有机会把窗口调回来
 
@@ -765,16 +720,6 @@
     $('warning-title').textContent = '第 ' + n + ' 次警告：' + (VIOLATIONS[code] || code);
     $('warning-text').innerHTML = esc(detail) + '<br>这是第 <b>' + n + '</b> 次，还有 <b>' +
       (limit - n) + '</b> 次机会；<b>再次发生将立即自动交卷</b>。';
-    el.hidden = false;
-  }
-
-  /* 声音超标：只警告 + 记录，不交卷 */
-  function warnSound(detail) {
-    var el = $('warning-mask');
-    if (!el) { toast('警告：环境声音超标'); return; }
-    $('warning-title').textContent = '警告：环境声音超标';
-    $('warning-text').innerHTML = esc(detail) +
-      '<br>请保持考场安静。<b>本次不会交卷</b>，但该情况会被记录，交卷时一并上报教师端。';
     el.hidden = false;
   }
 
@@ -804,9 +749,6 @@
     GUARD.fired = false;
     GUARD.splitSince = 0;
     GUARD.msplitSince = 0;
-    GUARD.soundHits = 0;
-    GUARD.soundDb = SOUND_FLOOR;
-    GUARD.soundPeakDb = SOUND_FLOOR;
     GUARD.strikeGraceUntil = 0;
     S.violation = null;
     S.strikes = {};
@@ -815,7 +757,6 @@
   }
   function disarmGuard() {
     GUARD.armed = false;
-    stopSoundMonitor();
     clearInterval(GUARD.watchTimer);
     GUARD.watchTimer = null;
   }
@@ -833,84 +774,6 @@
     if (document.fullscreenElement && document.exitFullscreen) {
       try { document.exitFullscreen(); } catch (e) {}
     }
-  }
-
-  /* ---- 环境声音（麦克风 + Web Audio） ---- */
-  function startSoundMonitor() {
-    stopSoundMonitor();          // 多次开考时必须先清掉上一次的定时器，否则计数会成倍累加、导致误判
-    var md = navigator.mediaDevices;
-    if (!md || !md.getUserMedia) { GUARD.soundOk = false; return Promise.resolve(false); }
-    return Promise.resolve(md.getUserMedia({ audio: true })).then(function (stream) {
-      GUARD.micStream = stream;
-      var Ctx = window.AudioContext || window.webkitAudioContext;
-      if (!Ctx) { GUARD.soundOk = false; return false; }
-      var ctx = new Ctx();
-      if (ctx.state === 'suspended' && ctx.resume) { try { ctx.resume(); } catch (e) {} }
-      var analyser = ctx.createAnalyser();
-      analyser.fftSize = 1024;
-      ctx.createMediaStreamSource(stream).connect(analyser);
-      GUARD.audioCtx = ctx;
-      GUARD.soundFloat = typeof analyser.getFloatTimeDomainData === 'function';
-      GUARD.soundBuf = GUARD.soundFloat
-        ? new Float32Array(analyser.fftSize)
-        : new Uint8Array(analyser.fftSize);
-      GUARD.soundOk = true;
-      GUARD.soundTimer = setInterval(function () {
-        if (!guardActive() || !GUARD.soundBuf) return;
-        var sum = 0, i, v;
-        if (GUARD.soundFloat) {
-          analyser.getFloatTimeDomainData(GUARD.soundBuf);
-          for (i = 0; i < GUARD.soundBuf.length; i++) { v = GUARD.soundBuf[i]; sum += v * v; }
-        } else {
-          analyser.getByteTimeDomainData(GUARD.soundBuf);
-          for (i = 0; i < GUARD.soundBuf.length; i++) {
-            v = (GUARD.soundBuf[i] - 128) / 128; sum += v * v;
-          }
-        }
-        var rms = Math.sqrt(sum / GUARD.soundBuf.length);
-        var dbfs = rms > 0 ? 20 * Math.log10(rms) : -100;
-        if (!isFinite(dbfs) || dbfs < -100) dbfs = -100;
-        var db = Math.round(dbfs + 100);          // 换算成 0~100 的相对声级
-        if (db < SOUND_FLOOR) db = SOUND_FLOOR;
-        GUARD.soundDb = db;
-        if (db > GUARD.soundPeakDb) GUARD.soundPeakDb = db;
-        renderSoundMeter();
-
-        if (db > SOUND_DB_LIMIT) GUARD.soundHits++;
-        else if (GUARD.soundHits > 0) GUARD.soundHits--;
-        if (GUARD.soundHits >= SOUND_HOLD) {
-          GUARD.soundHits = 0;                 // 复位，避免持续超标时反复累加
-          var sMsg = '环境声音 ' + db + ' dB，超过限值 ' + SOUND_DB_LIMIT +
-            ' dB 并持续约 ' + (SOUND_HOLD / 10).toFixed(1) + ' 秒';
-          flagSound(sMsg, db);                 // 只记录，不交卷
-          if (Date.now() - (GUARD.soundWarnAt || 0) > 15000) {
-            GUARD.soundWarnAt = Date.now();
-            warnSound(sMsg);                   // 弹一次警告（15 秒冷却，避免连续弹）
-          }
-        }
-      }, 100);
-      return true;
-    }).catch(function () { GUARD.soundOk = false; return false; });
-  }
-
-  /* 实时声级显示：让考生自己看得见当前电平与限值的差距 */
-  function renderSoundMeter() {
-    var el = $('sound-meter');
-    if (!el) return;
-    var db = GUARD.soundDb;
-    var flagged = !!(S.violation && S.violation.code === 'sound');
-    var over = db > SOUND_DB_LIMIT;
-    el.className = 'gmeter' + (over ? ' over' : '') + (flagged ? ' flagged' : '');
-    el.textContent = '环境声音 ' + db + ' dB　限值 ' + SOUND_DB_LIMIT + ' dB' +
-      (flagged ? '　已记录' : '');
-  }
-  function stopSoundMonitor() {
-    clearInterval(GUARD.soundTimer);
-    GUARD.soundTimer = null;
-    try { if (GUARD.micStream) GUARD.micStream.getTracks().forEach(function (t) { t.stop(); }); } catch (e) {}
-    try { if (GUARD.audioCtx && GUARD.audioCtx.close) GUARD.audioCtx.close(); } catch (e) {}
-    GUARD.micStream = null;
-    GUARD.audioCtx = null;
   }
 
   /* ---- 事件监听（常驻注册，靠 guardActive() 判断是否生效） ---- */
@@ -936,10 +799,6 @@
 
   document.addEventListener('keydown', function (e) {
     if (!guardActive()) return;
-    if (e.key === 'PrintScreen' || e.code === 'PrintScreen') {
-      trip('screenshot', '按下截屏键 PrintScreen');
-      return;
-    }
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
       var k = String(e.key || '').toLowerCase();
       if (k === 'c' || k === 'x' || k === 'v') {
@@ -1080,160 +939,17 @@
     beginExam2();
   }
 
-  /* ============================================================
-     考前人脸采集
-     · 只能用摄像头现场拍摄（不允许从相册选图）
-     · 活体检测：连续帧差异，拍摄前必须出现过明显画面变化，
-       用于拦掉「拿一张静止照片对着摄像头」这种最简单的替考
-     · **不做自动身份比对** —— 系统里没有学籍参考照，无法判断「是不是本人」；
-       照片随成绩提交，由教师在教师端人工核验
-     ============================================================ */
-  var FACE = {
-    stream: null, timer: null, prev: null, moved: false,
-    photo: '', stage: 'preview', resolve: null, canvas: null, startedAt: 0,
-  };
-  var FACE_MOTION_TH = 6;       // 单帧平均差异超过该值视为「有动作」
-  var FACE_MAX_WAIT = 20000;    // 超过这么久还没检测到动作就提示
-
-  function setFaceStatus(msg, cls) {
-    var el = $('face-status');
-    if (!el) return;
-    el.textContent = msg;
-    el.className = 'face-status' + (cls ? ' ' + cls : '');
-  }
-
-  function stopFaceStream() {
-    if (FACE.timer) { clearInterval(FACE.timer); FACE.timer = null; }
-    if (FACE.stream) {
-      FACE.stream.getTracks().forEach(function (t) { try { t.stop(); } catch (e) {} });
-      FACE.stream = null;
-    }
-    var v = $('face-video');
-    if (v) { try { v.srcObject = null; } catch (e) {} }
-  }
-
-  /* 打开摄像头 + 活体检测。与「外层 Promise」解耦，
-     这样「重新拍摄」可以复用它，而不会把外层的 resolve 覆盖掉。 */
-  function startFaceCamera() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      setFaceStatus('当前浏览器不支持摄像头，无法完成人脸采集。请改用 Chrome / Edge / Safari。', 'err');
-      return;
-    }
-    FACE.moved = false;
-    FACE.prev = null;
-    FACE.startedAt = Date.now();
-    setFaceStatus('正在打开摄像头…', '');
-
-    var v = $('face-video');
-    var c = FACE.canvas || (FACE.canvas = document.createElement('canvas'));
-    c.width = 64; c.height = 48;
-    var ctx = c.getContext('2d', { willReadFrequently: true });
-
-    navigator.mediaDevices.getUserMedia({
-      video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } }, audio: false,
-    }).then(function (stream) {
-      FACE.stream = stream;
-      v.srcObject = stream;
-      try { v.play(); } catch (e) {}
-      setFaceStatus('请正对摄像头（取下口罩），并略微左右转头…', '');
-      if (FACE.timer) clearInterval(FACE.timer);
-      FACE.timer = setInterval(function () {
-        if (!FACE.stream || v.readyState < 2) return;
-        ctx.drawImage(v, 0, 0, c.width, c.height);
-        var d;
-        try { d = ctx.getImageData(0, 0, c.width, c.height).data; } catch (e) { return; }
-        if (FACE.prev) {
-          var sum = 0;
-          for (var i = 0; i < d.length; i += 4) {
-            sum += Math.abs(d[i] - FACE.prev[i]) + Math.abs(d[i + 1] - FACE.prev[i + 1]);
-          }
-          if (sum / (d.length / 4) / 2 > FACE_MOTION_TH) FACE.moved = true;
-        }
-        FACE.prev = new Uint8ClampedArray(d);
-        if (FACE.moved) {
-          setFaceStatus('✔ 活体检测通过，可以拍摄了', 'ok');
-          if (FACE.stage === 'preview') $('face-shoot').disabled = false;
-        } else if (Date.now() - FACE.startedAt > FACE_MAX_WAIT) {
-          setFaceStatus('未检测到动作，请略微左右转头或靠近一点再试', 'err');
-        }
-      }, 200);
-    }).catch(function (err) {
-      var name = String((err && err.name) || '');
-      setFaceStatus(name === 'NotAllowedError'
-        ? '摄像头权限被拒绝。请在浏览器地址栏允许摄像头后刷新重试。'
-        : '无法打开摄像头（' + (name || '未知错误') + '）。', 'err');
-    });
-  }
-
-  function openFaceCapture() {
-    return new Promise(function (resolve) {
-      FACE.resolve = resolve;
-      FACE.photo = ''; FACE.moved = false; FACE.prev = null; FACE.stage = 'preview';
-      $('face-preview').hidden = true;
-      $('face-video').hidden = false;
-      $('face-shoot').hidden = false;
-      $('face-shoot').disabled = true;
-      $('face-shoot').textContent = '拍摄照片';
-      $('face-retake').hidden = true;
-      $('face-mask').hidden = false;
-      stopFaceStream();
-      startFaceCamera();
-    });
-  }
-
-  function shootFace() {
-    var v = $('face-video');
-    var c = document.createElement('canvas');
-    c.width = 320; c.height = 240;
-    var ctx = c.getContext('2d');
-    ctx.translate(c.width, 0); ctx.scale(-1, 1);   // 与预览一致，镜像回来
-    try { ctx.drawImage(v, 0, 0, c.width, c.height); } catch (e) {}
-    FACE.photo = c.toDataURL('image/jpeg', 0.62);
-    $('face-preview').src = FACE.photo;
-    $('face-preview').hidden = false;
-    v.hidden = true;
-    $('face-shoot').textContent = '开始答题';
-    $('face-retake').hidden = false;
-    setFaceStatus('已采集（活体检测' + (FACE.moved ? '通过' : '未通过') + '），确认清晰后点「开始答题」',
-      FACE.moved ? 'ok' : 'err');
-    FACE.stage = 'shot';
-    if (FACE.timer) { clearInterval(FACE.timer); FACE.timer = null; }
-  }
-
-  function closeFaceCapture(result) {
-    stopFaceStream();
-    $('face-mask').hidden = true;
-    var r = FACE.resolve;
-    FACE.resolve = null;
-    if (r) r(result);
-  }
-
   function beginExam2() {
-    var btn = $('btn-start');
-    btn.disabled = true;
-    btn.textContent = '正在准备考场…';
-    // 考前人脸采集（必填）
-    openFaceCapture().then(function (face) {
-      if (!face || !face.photo) {
-        btn.disabled = false;
-        btn.textContent = '开始答题';
-        toast('未完成人脸采集，无法开始答题');
-        return;
-      }
-      S.face = face;
-      runExamSetup();
-    });
+    runExamSetup();
   }
 
   function runExamSetup() {
     var btn = $('btn-start');
     btn.disabled = true;
     btn.textContent = '正在准备考场…';
-    suppressGuard(20000);                  // 全屏 + 麦克风授权期间自身造成的失焦不算违规
+    suppressGuard(20000);                  // 全屏授权期间自身造成的失焦不算违规
 
     requestExamFullscreen().then(function () {
-      return withTimeout(startSoundMonitor(), 15000, false);
-    }).then(function () {
       btn.disabled = false;
       btn.textContent = '开始答题';
       startExam();
@@ -1319,18 +1035,12 @@
     if (!el) return;
     var items = [
       ['退出/切屏拦截', true],
-      ['截屏拦截', true],
       [isSmallScreen() ? '分屏/悬浮窗拦截' : '全屏与分屏拦截', isSmallScreen() ? true : GUARD.fsOk],
       ['复制粘贴拦截', true],
-      ['环境声音监测（超标仅记录，不交卷）', GUARD.soundOk],
     ];
     el.innerHTML = items.map(function (it) {
       return '<span class="gitem ' + (it[1] ? 'on' : 'off') + '">' + (it[1] ? '✔' : '✖') + ' ' + esc(it[0]) + '</span>';
-    }).join('') +
-      (GUARD.soundOk
-        ? '<span class="gmeter" id="sound-meter">环境声音 -- dB　限值 ' + SOUND_DB_LIMIT + ' dB</span>'
-        : '<span class="gnote">未取得麦克风授权，本次不监测环境声音（成绩单会如实标注）</span>');
-    if (GUARD.soundOk) renderSoundMeter();
+    }).join('');
   }
 
   /* ---------- 渲染答题页 ---------- */
@@ -1759,10 +1469,7 @@
       (S.violation
         ? '<b>考核状态：违规（' + esc(VIOLATIONS[S.violation.code] || S.violation.code) + '）</b>，系统已立即交卷。'
         : (S.timedOut ? '<b>考核状态：超时自动交卷</b>。' : '考核状态：正常交卷。')) +
-      '　环境声音监测：' + (GUARD.soundOk
-        ? '已开启（限值 ' + SOUND_DB_LIMIT + ' dB，本次最高 ' +
-          GUARD.soundPeakDb + ' dB）'
-        : '未开启（未取得麦克风授权）') + '。</p>');
+      '</p>');
 
     h.push('<h2>二、分题库得分</h2>');
     h.push('<table><tr><th>来源题库</th><th>抽题数</th><th>答对</th><th>答错</th><th>得分</th></tr>');
@@ -1876,29 +1583,6 @@
 
   /* ---------- 按钮绑定 ---------- */
   $('btn-start').addEventListener('click', beginExam);
-  if ($('face-shoot')) {
-    $('face-shoot').addEventListener('click', function () {
-      if (FACE.stage === 'shot') { closeFaceCapture({ photo: FACE.photo, live: FACE.moved }); return; }
-      shootFace();
-    });
-  }
-  if ($('face-retake')) {
-    $('face-retake').addEventListener('click', function () {
-      FACE.stage = 'preview'; FACE.photo = ''; FACE.moved = false; FACE.prev = null;
-      $('face-preview').hidden = true;
-      $('face-video').hidden = false;
-      $('face-shoot').textContent = '拍摄照片';
-      $('face-shoot').disabled = true;
-      $('face-retake').hidden = true;
-      setFaceStatus('请重新正对摄像头，并略微左右转头…', '');
-      stopFaceStream();
-      startFaceCamera();
-    });
-  }
-  if ($('face-cancel')) {
-    $('face-cancel').addEventListener('click', function () { closeFaceCapture(null); });
-  }
-
   if ($('warning-ok')) {
     $('warning-ok').addEventListener('click', function () { $('warning-mask').hidden = true; });
   }

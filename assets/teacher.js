@@ -15,11 +15,9 @@
 
   /* 违规类型：与 app.js 的 VIOLATIONS 保持一致 */
   var VIO_LABEL = {
-    leave:      '退出考试界面',
-    screenshot: '截屏',
-    split:      '分屏 / 调整窗口',
-    copy:       '复制粘贴',
-    sound:      '环境声音',
+    leave: '退出考试界面',
+    split: '分屏 / 调整窗口',
+    copy:  '复制粘贴',
   };
 
   /* ---------- 基础工具 ---------- */
@@ -294,9 +292,6 @@
       vioDetail: r.violation_detail || '',
       violatedAt: r.violated_at ? fmtLocal(r.violated_at) : '',
       timedOut: !!r.timed_out,
-      soundMonitored: !!r.sound_monitored,
-      hasFace: !!r.has_face,          // 是否有考前人脸照片（照片本体走按需接口，不进列表）
-      faceLive: !!r.face_live,        // 活体检测是否通过
     };
   }
 
@@ -410,12 +405,6 @@
     renderClassFilter();
     renderAlarm();
     renderTable(list, st);
-    Array.prototype.forEach.call($('board-table').querySelectorAll('[data-face]'), function (b) {
-      b.addEventListener('click', function () {
-        var row = S.rows.filter(function (r) { return r.id === b.dataset.face; })[0];
-        showFace(b.dataset.face, row);
-      });
-    });
     renderSelbar();
   }
 
@@ -489,10 +478,6 @@
         '<td class="who">' + esc(r.name) + dupTag + '</td>' +
         '<td class="cls-cell">' + esc(r.cls) + '</td>' +
         '<td class="num">' + esc(r.sid) + '</td>' +
-        '<td class="face-cell">' + (r.hasFace
-          ? '<button class="face-btn" data-face="' + esc(r.id) + '">查看</button>' +
-            (r.faceLive ? '' : '<span class="face-none"> 活体未过</span>')
-          : '<span class="face-none">未采集</span>') + '</td>' +
         '<td class="score ' + (r.pass ? 'pass' : 'fail') + '">' + fmtNum(r.score) +
         '<span class="badge ' + (r.pass ? 'pass' : 'fail') + '">' + (r.pass ? '及格' : '不及格') + '</span></td>' +
         '<td class="num">' + r.right + '</td>' +
@@ -508,7 +493,7 @@
     }).join('');
 
     $('board-table').innerHTML = '<table><thead><tr>' +
-      '<th class="ck"></th><th>#</th><th>姓名</th><th>班级</th><th>学号</th><th>人脸</th><th>得分</th>' +
+      '<th class="ck"></th><th>#</th><th>姓名</th><th>班级</th><th>学号</th><th>得分</th>' +
       '<th>答对</th><th>答错</th><th>未答</th><th>正确率</th><th>用时</th><th>交卷时间</th><th>状态</th><th>操作</th>' +
       '</tr></thead><tbody>' + rows + '</tbody></table>';
 
@@ -672,32 +657,6 @@
     });
   }
 
-  /* ---------- 查看考前人脸照片（按需拉取，不拖慢列表） ---------- */
-  function showFace(id, row) {
-    var cloud = getCloud();
-    if (!cloud) { toast('云服务组件未加载'); return; }
-    var box = $('face-modal');
-    var img = $('face-photo');
-    var meta = $('face-meta');
-    if (!box || !img) return;
-    img.removeAttribute('src');
-    meta.innerHTML = '<b>' + esc((row && row.name) || '') + '</b>　' +
-      esc((row && row.cls) || '') + '　' + esc((row && row.sid) || '') +
-      '　交卷 ' + esc(fmtLocal((row && row.created_at) || '')) +
-      '<br><span class="hint">活体检测：' + (row && row.face_live ? '通过' : '未通过') + '</span>';
-    box.hidden = false;
-    Promise.resolve(cloud.database.rpc(CC.teacherPhotoRpc, { p_key: S.key, p_id: id }))
-      .then(function (res) {
-        if (res && res.error) throw res.error;
-        var url = Array.isArray(res.data) ? res.data[0] : res.data;
-        if (!url) { meta.innerHTML += '<br><b>未找到照片</b>'; return; }
-        img.src = url;
-      })
-      .catch(function (err) {
-        meta.innerHTML += '<br><b>读取失败：' + esc((err && err.message) || '网络异常') + '</b>';
-      });
-  }
-
   /* ---------- 导出 CSV ---------- */
   function exportCsv() {
     var list = S.view;
@@ -786,14 +745,6 @@
   if ($('btn-del-sel')) $('btn-del-sel').addEventListener('click', deleteSelected);
   if ($('btn-del-all')) $('btn-del-all').addEventListener('click', clearAll);
 
-  if ($('face-close')) {
-    $('face-close').addEventListener('click', function () { $('face-modal').hidden = true; });
-  }
-  if ($('face-modal')) {
-    $('face-modal').addEventListener('click', function (e) {
-      if (e.target === this) this.hidden = true;
-    });
-  }
 
   $('f-class').addEventListener('change', function () { S.filterCls = this.value; render(); });
   $('f-sort').addEventListener('change', function () { S.sort = this.value; render(); });

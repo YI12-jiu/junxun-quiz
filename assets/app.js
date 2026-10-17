@@ -708,7 +708,7 @@
     return GUARD.armed && !GUARD.fired && !S.graded && Date.now() >= GUARD.suppressUntil;
   }
 
-  var STAGED_LIMIT = { leave: 2, split: 2 };
+  var STAGED_LIMIT = { leave: 4, split: 4, copy: 4 };   // 前 3 次警告（n<4），第 4 次交卷
   var STRIKE_GRACE = 3000;   // 警告后给 3 秒宽限，让学生有机会把窗口调回来
 
   function inStrikeGrace() { return Date.now() < (GUARD.strikeGraceUntil || 0); }
@@ -718,8 +718,11 @@
     var el = $('warning-mask');
     if (!el) { toast('警告：' + (VIOLATIONS[code] || code) + '（第 ' + n + ' 次）'); return; }
     $('warning-title').textContent = '第 ' + n + ' 次警告：' + (VIOLATIONS[code] || code);
-    $('warning-text').innerHTML = esc(detail) + '<br>这是第 <b>' + n + '</b> 次，还有 <b>' +
-      (limit - n) + '</b> 次机会；<b>再次发生将立即自动交卷</b>。';
+    var left = limit - n;
+    var tail = left > 0
+      ? '还有 <b>' + left + '</b> 次机会；再犯将自动交卷。'
+      : '<b>这是最后一次警告，下次将立即自动交卷。</b>';
+    $('warning-text').innerHTML = esc(detail) + '<br>这是第 <b>' + n + '</b> 次，' + tail;
     el.hidden = false;
   }
 
@@ -797,6 +800,7 @@
     if (!document.fullscreenElement) trip('split', '退出了全屏（可能进入了分屏或调整了窗口）');
   });
 
+  /* 复制粘贴：与前两类一样走「前 3 次警告、第 4 次交卷」 */
   document.addEventListener('keydown', function (e) {
     if (!guardActive()) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey) {
@@ -810,26 +814,19 @@
   ['copy', 'cut', 'paste'].forEach(function (ev) {
     var label = { copy: '复制', cut: '剪切', paste: '粘贴' }[ev];
     document.addEventListener(ev, function (e) {
-      if (e.preventDefault) e.preventDefault();
       if (!guardActive()) return;
       trip('copy', '触发了' + label + '操作');
     }, true);
   });
 
   document.addEventListener('contextmenu', function (e) {
-    if (e.preventDefault) e.preventDefault();
     if (!guardActive()) return;
     trip('copy', '打开了右键菜单或长按菜单');
   }, true);
 
-  /* 移动端加固：
-     ① 长按选中后系统会弹出「拷贝/粘贴」菜单，iOS 不一定触发 contextmenu，
-        因此同时捕获 selectstart、以及 beforeinput 的 insertFromPaste；
-     ② 输入框被粘贴/拖入内容同样算违规。 */
   document.addEventListener('selectstart', function (e) {
     if (!guardActive()) return;
-    if (inInput(e.target)) return;          // 在输入框里选中自己打的字是正常的
-    if (e.preventDefault) e.preventDefault();
+    if (inInput(e.target)) return;
     trip('copy', '尝试选中页面文字（移动端长按选择）');
   }, true);
 
@@ -842,7 +839,6 @@
   }, true);
 
   document.addEventListener('drop', function (e) {
-    if (e.preventDefault) e.preventDefault();
     if (!guardActive()) return;
     trip('copy', '拖入了内容');
   }, true);

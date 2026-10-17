@@ -426,6 +426,9 @@ kbd {
 .pane { display: none; }
 .pane.on { display: block; }
 
+/* 首页底部那排统计卡与英雄区/考核卡信息重复，隐藏 */
+#start-stats { display: none !important; }
+
 /* ---------- 首页英雄区 ---------- */
 .hero-banner {
   position: relative; overflow: hidden; border-radius: 20px;

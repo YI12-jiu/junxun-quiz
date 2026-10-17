@@ -786,10 +786,108 @@
 
   /* ---------- 屏幕切换 ---------- */
   function show(name) {
-    ['screen-start', 'screen-exam', 'screen-result'].forEach(function (id) {
+    ['screen-login', 'screen-start', 'screen-exam', 'screen-result'].forEach(function (id) {
       $(id).classList.toggle('active', id === 'screen-' + name);
     });
     window.scrollTo({ top: 0, behavior: 'auto' });
+  }
+
+  /* ============================================================
+     考生登录（学号 + 姓名）
+     · 首次登录自动登记；之后同一学号必须姓名一致，否则拒绝
+     · 登录态存在本机，下次打开自动进入
+     ============================================================ */
+  var LS_LOGIN = 'quiz.login';
+  function getLogin() {
+    var v = lsGet(LS_LOGIN, null);
+    return (v && v.sid && v.name) ? v : null;
+  }
+  function setLogin(sid, name) { lsSet(LS_LOGIN, { sid: sid, name: name, at: Date.now() }); }
+  function clearLogin() { try { localStorage.removeItem(LS_LOGIN); } catch (e) {} }
+
+  function showLoginError(msg) {
+    var el = $('login-msg');
+    if (!el) { toast(msg); return; }
+    el.textContent = msg;
+    el.hidden = false;
+  }
+  function clearLoginError() {
+    var el = $('login-msg');
+    if (el) { el.hidden = true; el.textContent = ''; }
+  }
+
+  function doLogin() {
+    var sid = String(($('login-id') || {}).value || '').trim();
+    var name = String(($('login-name') || {}).value || '').trim();
+    var btn = $('btn-login');
+    clearLoginError();
+    if (sid.length < 4 || sid.length > 24) { showLoginError('学号需 4-24 位'); return; }
+    if (!name) { showLoginError('请填写姓名'); return; }
+    if (name.length > 20) { showLoginError('姓名最多 20 字'); return; }
+
+    btn.disabled = true;
+    btn.textContent = '登录中…';
+    ensureSdk().then(function (ok) {
+      if (!ok) throw new Error('cloud-sdk-unavailable');
+      var cloud = getCloud();
+      if (!cloud || !CC || !CC.studentLoginRpc) throw new Error('cloud-sdk-unavailable');
+      return cloud.database.rpc(CC.studentLoginRpc, { p_sid: sid, p_name: name });
+    }).then(function (res) {
+      if (res && res.error) throw res.error;
+      var r = Array.isArray(res.data) ? res.data[0] : res.data;
+      r = r || {};
+      if (!r.ok) {
+        btn.disabled = false; btn.textContent = '登录并进入';
+        showLoginError(r.msg || '登录失败，请重试');
+        return;
+      }
+      setLogin(r.sid || sid, r.name || name);
+      enterAfterLogin(!!r.first);
+    }).catch(function (err) {
+      btn.disabled = false;
+      btn.textContent = '登录并进入';
+      var m = String((err && err.message) || '');
+      showLoginError(m.indexOf('cloud-sdk') > -1
+        ? '网络异常，无法连接服务器，请稍后重试'
+        : '登录失败，请检查网络后重试');
+    });
+  }
+
+  /* 登录成功：填充考生信息并进入首页 */
+  function enterAfterLogin(isFirst) {
+    var lg = getLogin();
+    if (!lg) return;
+    S.examinee = { sid: lg.sid, name: lg.name, cls: (S.examinee && S.examinee.cls) || '' };
+    if ($('in-id')) { $('in-id').value = lg.sid; $('in-id').readOnly = true; }
+    if ($('in-name')) { $('in-name').value = lg.name; $('in-name').readOnly = true; }
+    if ($('in-class') && !$('in-class').value) {
+      var last = lsGet(LS_ID, null);
+      if (last && last.cls) $('in-class').value = last.cls;
+    }
+    var btn = $('btn-login');
+    if (btn) { btn.disabled = false; btn.textContent = '登录并进入'; }
+    show('start');
+    if (isFirst) toast('首次登录，已为您登记：' + lg.name + '（' + lg.sid + '）');
+  }
+
+  function doLogout() {
+    clearLogin();
+    if ($('in-id')) { $('in-id').value = ''; $('in-id').readOnly = false; }
+    if ($('in-name')) { $('in-name').value = ''; $('in-name').readOnly = false; }
+    if ($('login-id')) $('login-id').value = '';
+    if ($('login-name')) $('login-name').value = '';
+    clearLoginError();
+    show('login');
+  }
+
+  /* 启动时决定先显示哪一屏 */
+  function bootAuth() {
+    var lg = getLogin();
+    if (lg) {
+      enterAfterLogin(false);
+    } else {
+      show('login');
+    }
   }
 
   /* ============================================================
@@ -980,6 +1078,35 @@
       new Promise(function (r) { setTimeout(function () { r(fallback); }, ms); }),
     ]);
   }
+
+  /* ---------- 错题库清单 ---------- */
+  function openWrongBook() {
+    var id = readIdentity();
+    if (!id) { toast('请先填写姓名、班级、学号'); return; }
+    var book = loadWrong(id.sid);
+    if (!book.length) { toast('错题库还是空的，先完成一次考核吧'); return; }
+
+    var box = $('wrong-mask');
+    if (!box) return;
+    $('wrong-n').textContent = '（' + book.length + ' 题）';
+    $('wrong-list').innerHTML = book.map(function (w, i) {
+      var bankName = (BANK_META[w.bank] || {}).name || w.bank;
+      var typeName = w.type === 'M' ? '多选' : '单选';
+      var yourAns = (w.lastPicked && w.lastPicked.length) ? w.lastPicked.join('') : '未作答';
+      return '<div class="wrong-item">' +
+        '<div class="wq">' + (i + 1) + '. ' + esc(w.stem) + '</div>' +
+        '<div class="wmeta">' +
+          '<span class="bk">' + esc(bankName) + ' · ' + typeName + '</span>' +
+          '<span class="no">你的答案：' + esc(yourAns) + '</span>' +
+          '<span class="ok">正确答案：' + esc(w.answer.join('')) + '</span>' +
+          '<span class="cnt">错 ' + (w.wrongCount || 1) + ' 次</span>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+    $('wrong-start').textContent = '开始练习（' + book.length + ' 题）';
+    box.hidden = false;
+  }
+  function closeWrongBook() { var b = $('wrong-mask'); if (b) b.hidden = true; }
 
   /* ---------- 错题练习 ---------- */
   function beginWrongPractice() {
@@ -1678,8 +1805,31 @@
     $('violation-ok').addEventListener('click', function () { $('violation-mask').hidden = true; });
   }
 
+  if ($('btn-login')) $('btn-login').addEventListener('click', doLogin);
+  ['login-id', 'login-name'].forEach(function (id) {
+    var el = $(id);
+    if (el) el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); doLogin(); }
+    });
+    if (el) el.addEventListener('input', clearLoginError);
+  });
+  if ($('btn-logout')) $('btn-logout').addEventListener('click', doLogout);
+
   $('btn-start').addEventListener('click', beginExam);
-  if ($('btn-practice')) $('btn-practice').addEventListener('click', beginWrongPractice);
+  if ($('btn-practice')) $('btn-practice').addEventListener('click', openWrongBook);
+  if ($('wrong-close')) $('wrong-close').addEventListener('click', closeWrongBook);
+  if ($('wrong-cancel')) $('wrong-cancel').addEventListener('click', closeWrongBook);
+  if ($('wrong-start')) {
+    $('wrong-start').addEventListener('click', function () {
+      closeWrongBook();
+      beginWrongPractice();
+    });
+  }
+  if ($('wrong-mask')) {
+    $('wrong-mask').addEventListener('click', function (e) {
+      if (e.target === this) closeWrongBook();
+    });
+  }
   $('btn-submit').addEventListener('click', submit);
   $('btn-submit-top').addEventListener('click', submit);
   $('btn-doc').addEventListener('click', downloadDoc);
@@ -1717,5 +1867,6 @@
 
   /* ---------- 启动 ---------- */
   renderStart();
+  bootAuth();                   // 未登录先显示登录页，已登录直接进首页
   flushPending();               // 启动时补传上次未成功的成绩
 })();

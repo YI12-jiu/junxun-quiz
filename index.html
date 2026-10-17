@@ -11,7 +11,28 @@
 <body>
 
 <!-- ============ 首页 ============ -->
-<section class="screen active" id="screen-start">
+<section class="screen active" id="screen-login">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-brand">军事技能训练 · 综合考核</div>
+      <h2>考生登录</h2>
+      <p class="login-tip">请使用<b>学号</b>与<b>姓名</b>登录。首次登录会自动登记，之后同一学号必须姓名一致。</p>
+      <label class="fld">
+        <span>学号</span>
+        <input id="login-id" type="text" inputmode="numeric" placeholder="请输入学号" autocomplete="username">
+      </label>
+      <label class="fld">
+        <span>姓名</span>
+        <input id="login-name" type="text" placeholder="请输入姓名" autocomplete="name">
+      </label>
+      <p class="hint err" id="login-msg" hidden></p>
+      <button class="btn btn-primary login-btn" id="btn-login">登录并进入</button>
+      <p class="login-foot">教师请从页面右下角「教师端成绩汇总」进入</p>
+    </div>
+  </div>
+</section>
+
+<section class="screen" id="screen-start">
   <div class="wrap">
     <div class="hero">
       <div class="eyebrow">Military · Handbook · Safety</div>
@@ -37,6 +58,7 @@
           <input id="in-id" type="text" maxlength="24" placeholder="请输入学号" autocomplete="off">
         </label>
       </div>
+      <button class="btn-mini logout" id="btn-logout" type="button">退出登录</button>
       <p class="hint" id="id-hint">姓名、班级、学号会写入考核成绩单，请核对无误后开始答题。</p>
     </div>
 
@@ -165,6 +187,21 @@
     <div class="acts">
       <button class="btn btn-ghost" id="modal-cancel">取消</button>
       <button class="btn btn-primary" id="modal-ok">确定</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrong-mask" id="wrong-mask" hidden>
+  <div class="wrong-card">
+    <div class="wrong-head">
+      <h3>我的错题库 <span class="wrong-n" id="wrong-n"></span></h3>
+      <button class="wrong-x" id="wrong-close" aria-label="关闭">×</button>
+    </div>
+    <p class="wrong-tip">答对即自动移出错题库；错题库按学号保存在本机浏览器。</p>
+    <div class="wrong-list" id="wrong-list"></div>
+    <div class="wrong-acts">
+      <button class="btn btn-primary" id="wrong-start">开始练习</button>
+      <button class="btn btn-ghost" id="wrong-cancel">关闭</button>
     </div>
   </div>
 </div>

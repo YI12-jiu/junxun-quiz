@@ -12,5 +12,6 @@ window.CLOUD_CONFIG = {
   teacherDeleteRpc: 'teacher_delete_record',
   teacherDeleteManyRpc: 'teacher_delete_records',
   teacherClearRpc: 'teacher_clear_records',
-  teacherPhotoRpc: 'teacher_record_photo'
+  teacherPhotoRpc: 'teacher_record_photo',
+  studentLoginRpc: 'student_do_login'
 };

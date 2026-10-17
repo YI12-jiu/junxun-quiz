@@ -532,6 +532,40 @@ kbd {
 }
 .btn-mini.logout:hover { border-color: var(--bad); color: var(--bad); }
 
+/* ---------- 练习模式：答完即时反馈 ---------- */
+.opt.locked { cursor: default; }
+.opt.locked:not(.correct):not(.wrong) { opacity: .55; }
+.opt.correct {
+  border-color: var(--ok) !important;
+  background: var(--ok-soft) !important;
+}
+.opt.correct .box { background: var(--ok) !important; color: #fff !important; border-color: var(--ok) !important; }
+.opt.wrong {
+  border-color: var(--bad) !important;
+  background: var(--bad-soft) !important;
+}
+.opt.wrong .box { background: var(--bad) !important; color: #fff !important; border-color: var(--bad) !important; }
+
+.pfb {
+  display: flex; gap: 11px; align-items: flex-start;
+  border-radius: 12px; padding: 12px 14px; margin: 12px 0 4px; font-size: 13.5px; line-height: 1.75;
+}
+.pfb.ok { background: var(--ok-soft); border: 1px solid rgba(18, 145, 91, .28); }
+.pfb.bad { background: var(--bad-soft); border: 1px solid rgba(211, 58, 58, .25); }
+.pfb .pmark {
+  flex: 0 0 auto; width: 22px; height: 22px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 800; color: #fff;
+}
+.pfb.ok .pmark { background: var(--ok); }
+.pfb.bad .pmark { background: var(--bad); }
+.pfb .pbody { flex: 1; color: var(--ink-2); }
+.pfb .pbody b { color: var(--ink); }
+.pfb .note {
+  display: block; margin-top: 4px; font-size: 12.5px; color: var(--ink-3);
+}
+#btn-confirm-pick { margin-right: 8px; }
+
 /* ---------- 错题本：勾选条 ---------- */
 .selbar-inline {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;

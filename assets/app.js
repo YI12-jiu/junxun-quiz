@@ -274,6 +274,30 @@
     return wrongCount(sid);
   }
 
+  /* 单项加入 / 移出错题库（练习即时反馈用） */
+  function addWrongItem(it) {
+    var sid = S.examinee && S.examinee.sid;
+    if (!sid || !it || !it.id) return;
+    var book = loadWrong(sid);
+    var pos = -1;
+    for (var i = 0; i < book.length; i++) if (book[i].id === it.id) { pos = i; break; }
+    var prev = pos >= 0 ? book[pos] : null;
+    var t = {
+      id: it.id, bank: it.bank, type: it.type, stem: it.stem,
+      options: it.options, answer: it.answer.slice(),
+      lastPicked: it.picked ? it.picked.slice() : [],
+      wrongCount: (prev ? prev.wrongCount : 0) + 1,
+      lastAt: fmtDate(),
+    };
+    if (prev) book[pos] = t; else book.push(t);
+    saveWrong(sid, book.filter(Boolean));
+  }
+  function removeWrongById(qid) {
+    var sid = S.examinee && S.examinee.sid;
+    if (!sid || !qid) return;
+    saveWrong(sid, loadWrong(sid).filter(function (w) { return w.id !== qid; }));
+  }
+
   /* ---------- 按题库题量比例分配名额（最大余数法） ---------- */
   /* 保证：① 每个题库都有题；② 各库占比稳定 = 该库题量占总量之比。 */
   function bankQuota(type, total, banks) {
@@ -1345,6 +1369,7 @@
     S.idx = 0; S.graded = false; S.filter = 'wrong';
     S.startAt = Date.now(); S.elapsed = 0; S.finishedAt = '';
     S.violation = null; S.timedOut = false; S.wrongLeft = 0;
+    S.locked = {};                       // 练习模式：每题的判定结果
     uploadState = { status: 'idle', msg: '', sub: '' };
     $('pill-who').textContent = S.examinee.name + ' · ' + label + '（' + paper.length + ' 题）';
     $('btn-submit').disabled = false;
@@ -1617,22 +1642,46 @@
         '标点、全半角、写法差异不影响判分。</p>';
     } else {
       html += '<div class="qstem">' + esc(item.stem) + '</div>';
+      var lk = (S.practice && S.locked) ? S.locked[item.id] : null;
       html += '<div class="opts">';
       item.options.forEach(function (o) {
         var on = item.picked.indexOf(o[0]) > -1;
-        html += '<button type="button" class="opt' + (on ? ' on' : '') + '" data-opt="' + esc(o[0]) + '">' +
+        var cls = 'opt' + (on ? ' on' : '');
+        if (lk) {
+          cls += ' locked';
+          if (item.answer.indexOf(o[0]) > -1) cls += ' correct';
+          else if (on) cls += ' wrong';
+        }
+        html += '<button type="button" class="' + cls + '" data-opt="' + esc(o[0]) + '">' +
           '<span class="box' + (isMulti ? '' : ' round') + '">' + esc(o[0]) + '</span>' +
           '<span class="txt">' + esc(o[1]) + '</span></button>';
       });
       html += '</div>';
+
+      /* 练习模式：答完立刻给反馈 */
+      if (lk) {
+        html += '<div class="pfb ' + (lk.ok ? 'ok' : 'bad') + '">' +
+          '<span class="pmark">' + (lk.ok ? '✓' : '✕') + '</span>' +
+          '<div class="pbody">' +
+            '<b>' + (lk.ok ? '回答正确' : '回答错误') + '</b>' +
+            (lk.ok
+              ? '　正确答案：<b>' + esc(lk.std) + '</b><span class="note">已从错题本移出</span>'
+              : '　你的答案：<b>' + esc(lk.picked) + '</b>　正确答案：<b>' + esc(lk.std) + '</b>' +
+                (isMulti ? '<span class="note">多选题须与标准答案完全一致才得分，少选 / 多选均不得分。</span>' : '') +
+                '<span class="note">已加入错题本，可随时专项重练。</span>') +
+          '</div></div>';
+      }
     }
 
     html += '<div class="qnav">' +
       '<button class="btn btn-ghost" id="btn-prev"' + (S.idx === 0 ? ' disabled' : '') + '>上一题</button>' +
       '<span class="hint">' + (isFill ? '填空题：直接输入答案' : (isMulti ? '多选题：可选择多个选项' : '单选题：选择 1 个选项')) + '</span>' +
       '<div class="spacer"></div>' +
+      (S.practice && isMulti && !((S.locked || {})[item.id])
+        ? '<button class="btn btn-primary" id="btn-confirm-pick">确认作答</button>'
+        : '') +
       '<span class="hint">' + (isFill ? '用鼠标或 <kbd>Tab</kbd> 在空格间切换'
-        : '按 <kbd>A</kbd>~<kbd>H</kbd> 或 <kbd>1</kbd>~<kbd>8</kbd> 选择') +
+        : (S.practice ? '练习模式：答完即判对错' : '按 <kbd>A</kbd>~<kbd>H</kbd> 或 <kbd>1</kbd>~<kbd>8</kbd> 选择')) +
       '，<kbd>←</kbd><kbd>→</kbd> 翻页</span>' +
       '<button class="btn ' + (S.idx === qTotal() - 1 ? 'btn-ghost' : 'btn-primary') + '" id="btn-next">' +
       (S.idx === qTotal() - 1 ? '最后一题' : '下一题') + '</button>' +
@@ -1660,6 +1709,9 @@
       });
     }
 
+    if ($('btn-confirm-pick')) {
+      $('btn-confirm-pick').addEventListener('click', lockPracticeItem);
+    }
     $('btn-prev').addEventListener('click', function () { go(S.idx - 1); });
     $('btn-next').addEventListener('click', function () { go(S.idx + 1); });
 
@@ -1685,9 +1737,27 @@
     go(parseInt(b.dataset.i, 10));
   });
 
+  /* 练习模式：立即判对错并锁定本题（刷题 App 的核心体验） */
+  function lockPracticeItem() {
+    var item = S.paper[S.idx];
+    if (!item || !item.id) return;
+    if (S.locked && S.locked[item.id]) return;         // 已判定过，不可改
+    if (!item.picked.length) { toast('请先选择答案再确认'); return; }
+    var mine = item.picked.slice().sort().join('');
+    var std = item.answer.slice().sort().join('');
+    var ok = mine === std;
+    if (!S.locked) S.locked = {};
+    S.locked[item.id] = { ok: ok, picked: mine, std: std };
+    if (ok) removeWrongById(item.id); else addWrongItem(item);
+    S.answeredAt[S.idx] = Date.now();
+    renderExam();
+  }
+
   function pick(label) {
     var item = S.paper[S.idx];
     if (S.graded || !item || item.type === 'F') return;
+    // 练习模式下已判定的题不允许再改
+    if (S.practice && S.locked && S.locked[item.id]) return;
     if (item.type === 'M') {
       var i = item.picked.indexOf(label);
       if (i > -1) item.picked.splice(i, 1); else item.picked.push(label);
@@ -1695,6 +1765,8 @@
       item.picked = [label];
     }
     S.answeredAt[S.idx] = Date.now();
+    // 练习模式：单选点完立刻判定；多选需点「确认作答」
+    if (S.practice && item.type !== 'M') { lockPracticeItem(); return; }
     renderExam();
   }
 

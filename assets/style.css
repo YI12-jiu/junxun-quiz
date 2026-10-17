@@ -399,6 +399,16 @@ kbd {
 .result-alert b { font-weight: 800; }
 
 /* ---------- 违规遮罩 ---------- */
+/* ---------- 教师端入口 ---------- */
+.foot-link { color: var(--brand); font-weight: 700; text-decoration: none; }
+.foot-link:hover { text-decoration: underline; }
+.page-foot {
+  margin: 22px 0 8px; padding-top: 14px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px;
+}
+.page-foot .foot-sep { color: var(--ink-3); }
+.page-foot .foot-note { color: var(--ink-3); font-size: 12.5px; }
+
 /* ---------- 顶部导航（首页/错题本/统计） ---------- */
 .topnav {
   display: flex; gap: 6px; padding: 10px 16px 0; max-width: 1080px;

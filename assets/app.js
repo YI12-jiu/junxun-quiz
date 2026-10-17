@@ -714,6 +714,7 @@
   }
 
   var uploadBusy = false;
+  var uploadBusyAt = 0;          // 上传开始时间，用于检测「锁卡死」
 
   function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -746,9 +747,14 @@
   /* spreadMs：随机错峰窗口。大量考生同时交卷时用它把写入摊开，
      避免同一秒的集中写入触发平台限流。 */
   function submitUpload(silent, spreadMs) {
-    if (uploadBusy) return;
     if (!CC) return;
+    // 锁超过 10 秒仍未释放 → 视为卡死，强制复位继续（否则后续上传会被永久挡住）
+    if (uploadBusy) {
+      if (Date.now() - uploadBusyAt < 10000) return;
+      uploadBusy = false;
+    }
     uploadBusy = true;
+    uploadBusyAt = Date.now();
     var payload = buildPayload();
     var k = pendKey(payload);
     if (!silent) {
@@ -757,17 +763,35 @@
     }
     var jitter = spreadMs ? Math.floor(Math.random() * spreadMs) : 0;
 
+    /* 保险丝：上传流程万一卡住（网络挂起、Promise 不落定），
+       8 秒后强制解锁 uploadBusy 并暂存成绩 —— 否则后续所有上传都会被
+       「已在上传中」挡住，表现就是一直停在「正在上传成绩…」。 */
+    var fuse = setTimeout(function () {
+      if (!uploadBusy) return;
+      uploadBusy = false;
+      uploadBusyAt = 0;
+      addPending(payload);
+      uploadState = {
+        status: 'err', msg: '成绩上传超时',
+        sub: '已在本机暂存，可点击「重试上传」，不影响本次得分与成绩单下载。',
+      };
+      renderUpload();
+    }, 8000 + (jitter || 0));
+
     (jitter > 0 ? sleep(jitter) : Promise.resolve()).then(function () {
       return uploadWithRetry(payload, 3);
     }).then(function () {
+      clearTimeout(fuse);
       dropPending(k);
       return flushPending();
     }).then(function (extra) {
+      clearTimeout(fuse);
       uploadState = {
         status: 'ok', msg: '成绩已上传到教师端',
         sub: extra ? ('含补传 ' + extra + ' 条历史记录') : ('学号 ' + payload.sid + '，教师端可实时查看'),
       };
     }).catch(function (err) {
+      clearTimeout(fuse);
       addPending(payload);
       var code = String((err && err.code) || '');
       var msg = String((err && err.message) || '');
@@ -780,6 +804,7 @@
       };
     }).then(function () {
       uploadBusy = false;
+      uploadBusyAt = 0;
       renderUpload();
     });
   }

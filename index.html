@@ -6,7 +6,7 @@
 <title>综合考核系统 · 军事技能训练 / 学生手册 / 安全知识</title>
 <meta name="description" content="军事技能训练理论、学生手册、安全知识三库随机抽题考核系统：自动判分、错题回溯、随机不重复组卷。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127891;</text></svg>">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=20261017i">
 </head>
 <body>
 
@@ -27,7 +27,7 @@
       </label>
       <p class="hint err" id="login-msg" hidden></p>
       <button class="btn btn-primary login-btn" id="btn-login">登录并进入</button>
-      <p class="login-foot">教师请从页面右下角「教师端成绩汇总」进入</p>
+      <p class="login-foot">教师请从这里进入：<a class="foot-link" href="teacher.html">教师端成绩汇总 →</a></p>
     </div>
   </div>
 </section>
@@ -99,6 +99,12 @@
 
       <div class="grid-cards" id="start-stats"></div>
       <div id="history-box" hidden></div>
+
+      <div class="page-foot">
+        <a class="foot-link" href="teacher.html">教师端成绩汇总 →</a>
+        <span class="foot-sep">·</span>
+        <span class="foot-note">教师用各自口令登录，可查看/导出成绩与违规记录</span>
+      </div>
       <ul class="rules-list" id="start-rules" hidden></ul>
     </div>
 
@@ -236,8 +242,8 @@
      · banks.js 106KB：考完之后才需要，异步加载，加载完回调 __banksReady
      · 云 SDK 72KB：只在交卷上传需要，开考后在后台静默拉取 -->
 <!-- ?v= 版本号：改了资源内容就改它，避免浏览器用旧缓存导致功能异常 -->
-<script src="assets/cloud-config.js?v=20261017h"></script>
-<script src="assets/app.js?v=20261017h"></script>
-<script async src="assets/banks.js?v=20261017h" onload="window.__banksReady&&window.__banksReady()"></script>
+<script src="assets/cloud-config.js?v=20261017i"></script>
+<script src="assets/app.js?v=20261017i"></script>
+<script async src="assets/banks.js?v=20261017i" onload="window.__banksReady&&window.__banksReady()"></script>
 </body>
 </html>

@@ -235,6 +235,20 @@
     lsSet(LS_SEEN + sid, arr);
   }
 
+  /* ---------- 练习累计统计（正确率） ---------- */
+  var LS_PSTAT = 'quiz.pstat.';
+  function loadPStat(sid) {
+    var v = lsGet(LS_PSTAT + sid, null);
+    return (v && typeof v.t === 'number') ? v : { r: 0, t: 0 };
+  }
+  function addPStat(sid, ok) {
+    if (!sid) return;
+    var st = loadPStat(sid);
+    st.t += 1;
+    if (ok) st.r += 1;
+    lsSet(LS_PSTAT + sid, st);
+  }
+
   /* ---------- 错题库（按学号） ---------- */
   var LS_WRONG = 'quiz.wrong.';
   var WRONG_CAP = 300;                        // 错题库上限，避免 localStorage 过大
@@ -1204,8 +1218,31 @@
       '</button>';
   }
 
+  /* 首页英雄区的四格数据 */
+  function renderHero() {
+    var lg = getLogin();
+    var sid = lg ? lg.sid : '';
+    var seen = sid ? loadSeen(sid) : {};
+    var total = 0;
+    RULES[0].banks.forEach(function (b) {
+      total += (BANKS[b] || []).filter(function (q) { return q.t !== 'F'; }).length;
+    });
+    var done = bankDone('all', seen);
+    var st = loadPStat(sid);
+    var rate = st.t ? Math.round(st.r / st.t * 100) + '%' : '0%';
+
+    if ($('hb-total')) $('hb-total').textContent = total;
+    if ($('hb-done')) $('hb-done').textContent = done;
+    if ($('hb-rate')) $('hb-rate').textContent = rate;
+    if ($('hb-wrong')) $('hb-wrong').textContent = sid ? wrongCount(sid) : 0;
+    if ($('hb-sub')) {
+      $('hb-sub').textContent = total + ' 道题库原题，按考场规则 1:1 还原：50 题 / 35 分钟 / 全真模拟 / 即时判分。练到熟练，考时稳过。';
+    }
+  }
+
   /* 问候条：姓名 / 学号 / 班级 */
   function renderHello() {
+    renderHero();
     var lg = getLogin();
     var el = $('hello-name');
     if (el) el.textContent = lg ? (lg.name || '同学') : '同学';
@@ -1754,6 +1791,7 @@
     if (!S.locked) S.locked = {};
     S.locked[item.id] = { ok: ok, picked: mine, std: std };
     if (ok) removeWrongById(item.id); else addWrongItem(item);
+    addPStat(S.examinee && S.examinee.sid, ok);
     S.answeredAt[S.idx] = Date.now();
     renderExam();
   }
@@ -2227,6 +2265,33 @@
   }
 
   $('btn-start').addEventListener('click', beginExam);
+
+  /* 英雄区两个按钮 */
+  if ($('hero-exam')) {
+    $('hero-exam').addEventListener('click', function () {
+      var cls = (($('in-class') || {}).value || '').trim();
+      var agreed = $('agree-rules') && $('agree-rules').checked;
+      if (cls && agreed) { beginExam(); return; }
+      var card = $('idcard') || document.querySelector('.exam-card');
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.classList.add('flash');
+        setTimeout(function () { card.classList.remove('flash'); }, 1600);
+      }
+      if (!cls) {
+        toast('请先填写班级');
+        if ($('in-class')) setTimeout(function () { try { $('in-class').focus(); } catch (e) {} }, 400);
+      } else if (!agreed) {
+        toast('请先勾选「我已阅读并同意」');
+      }
+    });
+  }
+  if ($('hero-practice')) {
+    $('hero-practice').addEventListener('click', function () {
+      var g = $('bank-grid');
+      if (g) g.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
   if ($('btn-practice')) $('btn-practice').addEventListener('click', beginWrongPractice);
   if ($('wrong-all')) {
     $('wrong-all').addEventListener('change', function () {

@@ -6,7 +6,7 @@
 <title>综合考核系统 · 军事技能训练 / 学生手册 / 安全知识</title>
 <meta name="description" content="军事技能训练理论、学生手册、安全知识三库随机抽题考核系统：自动判分、错题回溯、随机不重复组卷。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127891;</text></svg>">
-<link rel="stylesheet" href="assets/style.css?v=20261017m">
+<link rel="stylesheet" href="assets/style.css?v=20261017n">
 </head>
 <body>
 
@@ -43,13 +43,25 @@
 
     <!-- ============ 首页 ============ -->
     <div class="pane on" id="pane-home">
-      <div class="hello">
-        <div>
-          <div class="hello-hi">你好，<b id="hello-name">同学</b></div>
-          <div class="hello-sub" id="hello-sub"></div>
+      <section class="hero-banner">
+        <div class="hb-inner">
+          <div class="hb-tag">2026 · 军事技能训练综合考核</div>
+          <h1 class="hb-title">军训理论<br>在线刷题与全真模拟</h1>
+          <p class="hb-sub" id="hb-sub">按考场规则 1:1 还原：50 题 / 35 分钟 / 全真模拟 / 即时判分。练到熟练，考时稳过。</p>
+          <div class="hb-acts">
+            <button class="hb-btn hb-primary" id="hero-exam">开始模拟考试</button>
+            <button class="hb-btn hb-ghost" id="hero-practice">继续刷题</button>
+            <button class="btn-mini logout hb-logout" id="btn-logout" type="button">退出登录</button>
+          </div>
+          <div class="hb-stats">
+            <div class="hb-stat"><b id="hb-total">0</b><span>题库总量</span></div>
+            <div class="hb-stat"><b id="hb-done">0</b><span>已练题数</span></div>
+            <div class="hb-stat"><b id="hb-rate">0%</b><span>练习正确率</span></div>
+            <div class="hb-stat"><b id="hb-wrong">0</b><span>错题本</span></div>
+          </div>
         </div>
-        <button class="btn-mini logout" id="btn-logout" type="button">退出登录</button>
-      </div>
+        <div class="hb-watermark" aria-hidden="true">军</div>
+      </section>
 
       <div class="card exam-card">
         <div class="card-head">
@@ -248,8 +260,8 @@
      · banks.js 106KB：考完之后才需要，异步加载，加载完回调 __banksReady
      · 云 SDK 72KB：只在交卷上传需要，开考后在后台静默拉取 -->
 <!-- ?v= 版本号：改了资源内容就改它，避免浏览器用旧缓存导致功能异常 -->
-<script src="assets/cloud-config.js?v=20261017m"></script>
-<script src="assets/app.js?v=20261017m"></script>
-<script async src="assets/banks.js?v=20261017m" onload="window.__banksReady&&window.__banksReady()"></script>
+<script src="assets/cloud-config.js?v=20261017n"></script>
+<script src="assets/app.js?v=20261017n"></script>
+<script async src="assets/banks.js?v=20261017n" onload="window.__banksReady&&window.__banksReady()"></script>
 </body>
 </html>

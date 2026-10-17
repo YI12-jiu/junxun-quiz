@@ -571,6 +571,57 @@ kbd {
 .bank-card .bc-fill { height: 100%; background: var(--brand); border-radius: 6px; transition: width .3s; }
 .bank-card .bc-done { font-size: 12px; color: var(--brand); font-weight: 700; }
 
+/* ---------- 题库构成表 ---------- */
+.comp-card { padding: 16px 18px 6px; }
+.comp-head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; flex-wrap: wrap; }
+.comp-head .comp-bar {
+  width: 4px; height: 16px; border-radius: 2px; background: var(--brand); display: inline-block;
+}
+.comp-head b { font-size: 15.5px; color: var(--ink); }
+.comp-head .comp-note { font-size: 12.5px; color: var(--ink-3); }
+.comp-wrap { overflow-x: auto; }
+.comp-table { width: 100%; border-collapse: collapse; min-width: 560px; }
+.comp-table th {
+  text-align: left; font-size: 12.5px; font-weight: 700; color: var(--ink-3);
+  padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+}
+.comp-table th.th-prog { width: 42%; }
+.comp-table td {
+  padding: 11px 10px; font-size: 13.5px; color: var(--ink-2);
+  border-bottom: 1px solid var(--line);
+}
+.comp-table tbody tr:last-child td { border-bottom: none; }
+.comp-table td:first-child { color: var(--ink); font-weight: 600; }
+.comp-table td.num { font-variant-numeric: tabular-nums; font-weight: 700; color: var(--ink); }
+.comp-table tr.total-row td { background: var(--brand-soft); font-weight: 700; color: var(--ink); }
+.comp-table tr.total-row td:first-child { border-radius: 8px 0 0 8px; }
+.comp-table tr.total-row td:last-child { border-radius: 0 8px 8px 0; font-weight: 600; color: var(--ink-2); }
+.comp-row { cursor: pointer; transition: background .12s; }
+.comp-row:hover { background: var(--brand-soft); }
+.comp-row .cgo {
+  margin-left: 7px; font-size: 11.5px; font-weight: 700; color: var(--brand);
+  opacity: 0; transition: opacity .12s;
+}
+.comp-row:hover .cgo { opacity: 1; }
+.cgo-all {
+  border: 1px solid var(--brand); background: #fff; color: var(--brand);
+  border-radius: 7px; padding: 2px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.cgo-all:hover { background: var(--brand); color: #fff; }
+.comp-prog { display: flex; align-items: center; gap: 9px; }
+.comp-prog .cbar {
+  flex: 1; height: 6px; border-radius: 4px; background: #ece8dd; overflow: hidden; min-width: 70px;
+}
+.comp-prog .cfill { height: 100%; background: var(--brand); border-radius: 4px; }
+.comp-prog .ctxt {
+  font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .comp-table { min-width: 0; }
+  .comp-table th.th-prog { width: auto; }
+  .comp-prog .ctxt { font-size: 11px; }
+}
+
 /* ---------- 功能卡 ---------- */
 .tool-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 14px; }
 @media (max-width: 640px) { .tool-grid { grid-template-columns: 1fr; } }

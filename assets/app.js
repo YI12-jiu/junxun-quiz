@@ -1258,19 +1258,49 @@
     }
   }
 
+  /* 首页「题库构成」表格：逐库列出题量与练习进度，整行可点进入练习 */
   function renderBankCards() {
-    var el = $('bank-grid');
-    if (!el) return;
+    var body = $('comp-body');
+    if (!body) return;
     var lg = getLogin();
     var seen = lg ? loadSeen(lg.sid) : {};
-    var html = bankCardHtml('all', '全部混刷', seen);
+    var tS = 0, tM = 0, tT = 0, rows = '';
+
     RULES[0].banks.forEach(function (b) {
-      html += bankCardHtml(b, (BANK_META[b] || {}).name || b, seen);
+      var st = bankStat(b);
+      var done = bankDone(b, seen);
+      var pct = st.total ? Math.round(done / st.total * 100) : 0;
+      tS += st.single; tM += st.multi; tT += st.total;
+      rows += '<tr class="comp-row" data-bank="' + b + '" title="点击开始练习该题库">' +
+        '<td>' + esc((BANK_META[b] || {}).name || b) + '<span class="cgo">练习 ›</span></td>' +
+        '<td class="num">' + st.total + '</td>' +
+        '<td class="num">' + st.single + '</td>' +
+        '<td class="num">' + st.multi + '</td>' +
+        '<td><div class="comp-prog">' +
+          '<div class="cbar"><i class="cfill" style="width:' + pct + '%"></i></div>' +
+          '<span class="ctxt">' + done + ' / ' + st.total + ' (' + pct + '%)</span>' +
+        '</div></td></tr>';
     });
-    el.innerHTML = html;
-    Array.prototype.forEach.call(el.querySelectorAll('.bank-card'), function (c) {
-      c.addEventListener('click', function () { beginBankPractice(c.dataset.bank); });
+
+    rows += '<tr class="total-row">' +
+      '<td>合计</td>' +
+      '<td class="num">' + tT + '</td>' +
+      '<td class="num">' + tS + '</td>' +
+      '<td class="num">' + tM + '</td>' +
+      '<td>每场考试随机抽取 ' + RULES[0].single + ' + ' + RULES[0].multi +
+      '　<button class="btn-mini cgo-all" id="comp-all">全部混刷 ›</button></td></tr>';
+
+    body.innerHTML = rows;
+
+    Array.prototype.forEach.call(body.querySelectorAll('.comp-row'), function (tr) {
+      tr.addEventListener('click', function () { beginBankPractice(tr.dataset.bank); });
     });
+    if ($('comp-all')) {
+      $('comp-all').addEventListener('click', function (e) {
+        e.stopPropagation();
+        beginBankPractice('all');
+      });
+    }
   }
 
   /* 错题本页 */

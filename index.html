@@ -6,7 +6,7 @@
 <title>综合考核系统 · 军事技能训练 / 学生手册 / 安全知识</title>
 <meta name="description" content="军事技能训练理论、学生手册、安全知识三库随机抽题考核系统：自动判分、错题回溯、随机不重复组卷。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127891;</text></svg>">
-<link rel="stylesheet" href="assets/style.css?v=20261017p">
+<link rel="stylesheet" href="assets/style.css?v=20261017q">
 </head>
 <body>
 
@@ -100,8 +100,22 @@
         <button class="btn btn-primary big" id="btn-start">开始答题</button>
       </div>
 
-      <h3 class="sec-h">选择题库开始练习</h3>
-      <div class="bank-grid" id="bank-grid"></div>
+      <h3 class="sec-h">题库构成</h3>
+      <div class="card comp-card">
+        <div class="comp-head">
+          <span class="comp-bar"></span>
+          <b>题库构成</b>
+          <span class="comp-note">三库合并为总池，按各库题量比例抽题</span>
+        </div>
+        <div class="comp-wrap">
+          <table class="comp-table">
+            <thead>
+              <tr><th>题库</th><th>总题量</th><th>单选题</th><th>多选题</th><th class="th-prog">你的练习进度</th></tr>
+            </thead>
+            <tbody id="comp-body"></tbody>
+          </table>
+        </div>
+      </div>
 
       <div class="tool-grid">
         <button class="tool" id="tool-star"><b>标星收藏</b><span>只刷我标星的题</span></button>
@@ -260,8 +274,8 @@
      · banks.js 106KB：考完之后才需要，异步加载，加载完回调 __banksReady
      · 云 SDK 72KB：只在交卷上传需要，开考后在后台静默拉取 -->
 <!-- ?v= 版本号：改了资源内容就改它，避免浏览器用旧缓存导致功能异常 -->
-<script src="assets/cloud-config.js?v=20261017p"></script>
-<script src="assets/app.js?v=20261017p"></script>
-<script async src="assets/banks.js?v=20261017p" onload="window.__banksReady&&window.__banksReady()"></script>
+<script src="assets/cloud-config.js?v=20261017q"></script>
+<script src="assets/app.js?v=20261017q"></script>
+<script async src="assets/banks.js?v=20261017q" onload="window.__banksReady&&window.__banksReady()"></script>
 </body>
 </html>

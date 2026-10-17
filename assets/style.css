@@ -532,6 +532,24 @@ kbd {
 }
 .btn-mini.logout:hover { border-color: var(--bad); color: var(--bad); }
 
+/* ---------- 错题本：勾选条 ---------- */
+.selbar-inline {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  padding: 9px 13px; margin: 12px 0 10px;
+}
+.selbar-inline .spacer { flex: 1; }
+.selbar-inline .tb-check { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.selbar-inline .sel-info { font-size: 13px; color: var(--ink-2); font-weight: 600; }
+.selbar-inline .sel-info b { color: var(--brand); }
+.selbar-inline input[type=checkbox] { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; }
+.selbar-inline .btn-mini { border: 1px solid var(--line-2); background: #fff; color: var(--ink-2);
+  border-radius: 7px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.selbar-inline .btn-mini:hover { border-color: var(--brand); color: var(--brand); }
+.selbar-inline .btn-mini:disabled { opacity: .45; cursor: not-allowed; }
+.wrong-item.pick { border-color: var(--brand-2); background: var(--brand-soft); }
+.wrong-item .wck { width: 16px; height: 16px; accent-color: var(--brand); cursor: pointer; margin-right: 8px; vertical-align: -2px; }
+
 /* ---------- 错题库清单 ---------- */
 .wrong-mask {
   position: fixed; inset: 0; z-index: 300; background: rgba(12, 18, 32, .62);

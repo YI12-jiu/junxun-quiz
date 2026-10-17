@@ -6,7 +6,7 @@
 <title>综合考核系统 · 军事技能训练 / 学生手册 / 安全知识</title>
 <meta name="description" content="军事技能训练理论、学生手册、安全知识三库随机抽题考核系统：自动判分、错题回溯、随机不重复组卷。">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>&#127891;</text></svg>">
-<link rel="stylesheet" href="assets/style.css?v=20261017i">
+<link rel="stylesheet" href="assets/style.css?v=20261017j">
 </head>
 <body>
 
@@ -114,7 +114,13 @@
         <h2>错题本</h2>
         <span class="hint" id="wrong-head-hint"></span>
       </div>
-      <p class="hint">答错自动收录，答对自动移出。错题库按学号保存在本机浏览器。</p>
+      <p class="hint">答错自动收录，答对自动移出。勾选你想练的题，不选则练全部。</p>
+      <div class="selbar-inline" id="wrong-selbar">
+        <label class="tb-check"><input type="checkbox" id="wrong-all"><span>全选</span></label>
+        <span class="sel-info" id="wrong-selcount">未选择</span>
+        <div class="spacer"></div>
+        <button class="btn-mini" id="wrong-selnone">取消选择</button>
+      </div>
       <div class="wrong-list inline" id="wrong-list"></div>
       <div class="pane-acts">
         <button class="btn btn-primary" id="btn-practice">开始练习错题</button>
@@ -242,8 +248,8 @@
      · banks.js 106KB：考完之后才需要，异步加载，加载完回调 __banksReady
      · 云 SDK 72KB：只在交卷上传需要，开考后在后台静默拉取 -->
 <!-- ?v= 版本号：改了资源内容就改它，避免浏览器用旧缓存导致功能异常 -->
-<script src="assets/cloud-config.js?v=20261017i"></script>
-<script src="assets/app.js?v=20261017i"></script>
-<script async src="assets/banks.js?v=20261017i" onload="window.__banksReady&&window.__banksReady()"></script>
+<script src="assets/cloud-config.js?v=20261017j"></script>
+<script src="assets/app.js?v=20261017j"></script>
+<script async src="assets/banks.js?v=20261017j" onload="window.__banksReady&&window.__banksReady()"></script>
 </body>
 </html>

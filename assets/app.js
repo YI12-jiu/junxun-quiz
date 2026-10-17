@@ -1213,6 +1213,31 @@
   }
 
   /* 错题本页 */
+  /* 错题本：勾选状态（按 id 存） */
+  function wrongSel() {
+    if (!S.wrongSel) S.wrongSel = {};
+    return S.wrongSel;
+  }
+  function renderWrongSelbar(book) {
+    var sel = wrongSel();
+    var n = book.filter(function (w) { return sel[w.id]; }).length;
+    var el = $('wrong-selcount');
+    if (el) el.innerHTML = n ? ('已选 <b>' + n + '</b> 题') : '未选择';
+    var all = $('wrong-all');
+    if (all) {
+      all.checked = book.length > 0 && n === book.length;
+      all.indeterminate = n > 0 && n < book.length;
+      all.disabled = !book.length;
+    }
+    var none = $('wrong-selnone');
+    if (none) none.disabled = !n;
+    var bp = $('btn-practice');
+    if (bp) {
+      bp.disabled = !book.length;
+      bp.textContent = n ? ('练习选中的 ' + n + ' 题') : ('练习全部错题（' + book.length + ' 题）');
+    }
+  }
+
   function renderWrongPane() {
     var lg = getLogin();
     var book = lg ? loadWrong(lg.sid) : [];
@@ -1222,15 +1247,17 @@
     if (!list) return;
     if (!book.length) {
       list.innerHTML = '<div class="wrong-empty">还没有错题。完成一次考核后，答错的题会自动收录到这里。</div>';
-      var bp0 = $('btn-practice'); if (bp0) bp0.disabled = true;
+      renderWrongSelbar([]);
       return;
     }
-    var bp = $('btn-practice'); if (bp) { bp.disabled = false; bp.textContent = '开始练习错题（' + book.length + ' 题）'; }
+    var sel = wrongSel();
     list.innerHTML = book.map(function (w, i) {
       var bankName = (BANK_META[w.bank] || {}).name || w.bank;
       var yourAns = (w.lastPicked && w.lastPicked.length) ? w.lastPicked.join('') : '未作答';
-      return '<div class="wrong-item">' +
-        '<div class="wq">' + (i + 1) + '. ' + esc(w.stem) + '</div>' +
+      var on = !!sel[w.id];
+      return '<div class="wrong-item' + (on ? ' pick' : '') + '">' +
+        '<div class="wq"><input type="checkbox" class="wck" data-id="' + esc(w.id) + '"' +
+          (on ? ' checked' : '') + '> ' + (i + 1) + '. ' + esc(w.stem) + '</div>' +
         '<div class="wmeta">' +
           '<span class="bk">' + esc(bankName) + ' · ' + (w.type === 'M' ? '多选' : '单选') + '</span>' +
           '<span class="no">你的答案：' + esc(yourAns) + '</span>' +
@@ -1238,6 +1265,17 @@
           '<span class="cnt">错 ' + (w.wrongCount || 1) + ' 次</span>' +
         '</div></div>';
     }).join('');
+
+    Array.prototype.forEach.call(list.querySelectorAll('.wck'), function (ck) {
+      ck.addEventListener('change', function () {
+        if (this.checked) wrongSel()[this.dataset.id] = 1;
+        else delete wrongSel()[this.dataset.id];
+        var item = this.closest('.wrong-item');
+        if (item) item.classList.toggle('pick', this.checked);
+        renderWrongSelbar(book);
+      });
+    });
+    renderWrongSelbar(book);
   }
 
   /* 统计页 */
@@ -1369,15 +1407,25 @@
 
   /* ---------- 错题练习 ---------- */
   function beginWrongPractice() {
-    var id = readIdentity();
-    if (!id) { toast('请先填写姓名、班级、学号'); return; }
+    // 错题练习是学习功能，不强制填班级：已登录就用登录态
+    var lg = getLogin();
+    if (!lg) { toast('请先登录'); return; }
+    var id = {
+      sid: lg.sid, name: lg.name,
+      cls: (($('in-class') || {}).value || '').trim() || '未填写',
+    };
     S.examinee = id;
     lsSet(LS_ID, id);
     var book = loadWrong(id.sid);
     if (!book.length) { toast('错题库还是空的，先完成一次考核吧'); return; }
 
+    // 勾选了就只练选中的；没勾选则练全部
+    var sel = wrongSel();
+    var chosen = book.filter(function (w) { return sel[w.id]; });
+    var use = chosen.length ? chosen : book;
+
     S.practice = true;
-    S.paper = book.map(function (w) {
+    S.paper = use.map(function (w) {
       return {
         id: w.id, bank: w.bank, type: w.type, stem: w.stem,
         options: w.options, answer: w.answer.slice(), picked: [],
@@ -2103,6 +2151,23 @@
 
   $('btn-start').addEventListener('click', beginExam);
   if ($('btn-practice')) $('btn-practice').addEventListener('click', beginWrongPractice);
+  if ($('wrong-all')) {
+    $('wrong-all').addEventListener('change', function () {
+      var lg = getLogin();
+      var book = lg ? loadWrong(lg.sid) : [];
+      var sel = wrongSel();
+      if (this.checked) book.forEach(function (w) { sel[w.id] = 1; });
+      else Object.keys(sel).forEach(function (k) { delete sel[k]; });
+      renderWrongPane();
+    });
+  }
+  if ($('wrong-selnone')) {
+    $('wrong-selnone').addEventListener('click', function () {
+      var sel = wrongSel();
+      Object.keys(sel).forEach(function (k) { delete sel[k]; });
+      renderWrongPane();
+    });
+  }
   if ($('wrong-close')) $('wrong-close').addEventListener('click', closeWrongBook);
   if ($('wrong-cancel')) $('wrong-cancel').addEventListener('click', closeWrongBook);
   if ($('wrong-start')) {

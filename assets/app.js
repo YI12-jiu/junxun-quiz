@@ -1658,6 +1658,14 @@
       });
       html += '</div>';
 
+      /* 练习模式 · 多选题：选好后需点确认 */
+      if (S.practice && isMulti && !lk) {
+        html += '<div class="pconfirm">' +
+          '<span class="pc-tip">多选题：选好后点右侧按钮提交（须与标准答案完全一致才得分）</span>' +
+          '<button class="btn btn-primary" id="btn-confirm-pick">确认作答</button>' +
+          '</div>';
+      }
+
       /* 练习模式：答完立刻给反馈 */
       if (lk) {
         html += '<div class="pfb ' + (lk.ok ? 'ok' : 'bad') + '">' +
@@ -1677,9 +1685,6 @@
       '<button class="btn btn-ghost" id="btn-prev"' + (S.idx === 0 ? ' disabled' : '') + '>上一题</button>' +
       '<span class="hint">' + (isFill ? '填空题：直接输入答案' : (isMulti ? '多选题：可选择多个选项' : '单选题：选择 1 个选项')) + '</span>' +
       '<div class="spacer"></div>' +
-      (S.practice && isMulti && !((S.locked || {})[item.id])
-        ? '<button class="btn btn-primary" id="btn-confirm-pick">确认作答</button>'
-        : '') +
       '<span class="hint">' + (isFill ? '用鼠标或 <kbd>Tab</kbd> 在空格间切换'
         : (S.practice ? '练习模式：答完即判对错' : '按 <kbd>A</kbd>~<kbd>H</kbd> 或 <kbd>1</kbd>~<kbd>8</kbd> 选择')) +
       '，<kbd>←</kbd><kbd>→</kbd> 翻页</span>' +
